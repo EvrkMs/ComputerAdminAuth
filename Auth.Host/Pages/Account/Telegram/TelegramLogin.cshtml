@@ -1,0 +1,141 @@
+@page
+@model Auth.Host.Pages.Account.Telegram.TelegramLoginModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Вход через Telegram</title>
+    <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6 bg-slate-50">
+    <div class="w-full max-w-md bg-white shadow rounded-xl p-6 space-y-4">
+        <h1 class="text-xl font-semibold">Вход через Telegram</h1>
+        <p class="text-slate-600 text-sm">
+            Если страница открыта в Telegram — выполнится автоматический вход по initData.
+            Если нет — используйте виджет Telegram ниже.
+        </p>
+
+        <div id="tg-iframe-note" class="hidden bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded">
+            Похоже, страница открыта внутри iframe (Web Telegram). Виджет входа может быть заблокирован.
+            Нажмите кнопку ниже, чтобы открыть страницу на весь экран и продолжить вход:
+            <div class="mt-2">
+                @{ var ru2 = Request.Query.ContainsKey("returnUrl") ? Request.Query["returnUrl"].ToString() : "/"; }
+                @{ var selfUrl = Url.Page("/Account/Telegram/TelegramLogin", null, new { returnUrl = ru2 }, Request.Scheme); }
+                <a target="_top" href="@selfUrl" class="inline-flex items-center px-3 py-2 bg-slate-800 text-white rounded hover:opacity-90">
+                    Открыть на весь экран
+                </a>
+            </div>
+        </div>
+
+        <div id="tg-widget" class="pt-2">
+            @{ var ru = Request.Query.ContainsKey("returnUrl") ? Request.Query["returnUrl"].ToString() : "/"; }
+            @{ var cb = Url.Page("/Account/Telegram/TelegramLogin", null, new { returnUrl = ru }, Request.Scheme); }
+            <script async src="https://telegram.org/js/telegram-widget.js?22"
+                    data-telegram-login="ava_smena_bot"
+                    data-size="large"
+                    data-userpic="false"
+                    data-request-access="write"
+                    data-lang="ru"
+                    data-auth-url="@cb">
+            </script>
+        </div>
+
+        <div class="pt-2">
+            <a class="text-slate-600 hover:text-slate-900 text-sm underline"
+               href="@Url.Page("/Account/Login", null, new { returnUrl = ru }, Request.Scheme)">Назад к форме входа</a>
+        </div>
+    </div>
+
+    <script>
+        (function(){
+            try{
+                var params = new URLSearchParams(location.search);
+                var returnUrl = params.get('returnUrl') || '/';
+                var tg = window.Telegram && window.Telegram.WebApp;
+                // Initialize Telegram Mini App (per docs)
+                if (tg && typeof tg.ready === 'function') { tg.ready(); }
+                try { if (tg && typeof tg.expand === 'function') tg.expand(); } catch(_) {}
+                try {
+                    if (tg) {
+                        var isDark = (tg.colorScheme === 'dark');
+                        document.documentElement.classList.toggle('dark', !!isDark);
+                        if (typeof tg.onEvent === 'function') {
+                            tg.onEvent('themeChanged', function() {
+                                var dark = (tg.colorScheme === 'dark');
+                                document.documentElement.classList.toggle('dark', !!dark);
+                            });
+                        }
+                    }
+                } catch(_) {}
+
+                function tryAutoLogin(){
+                    var hasInit = tg && typeof tg.initData === 'string' && tg.initData.length > 0;
+                    var inFrame = (function(){ try { return window.self !== window.top; } catch(e) { return true; } })();
+
+                    // Debug: log WebApp/initData presence (sanitized)
+                    try {
+                        var ui = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : null;
+                        console.log('[TG] WebApp context:', !!tg, 'inFrame:', inFrame, 'hasInitData:', !!hasInit,
+                            'user:', ui ? { id: ui.id, username: ui.username } : null);
+                        if (hasInit) console.debug('[TG] initData length:', tg.initData.length);
+                    } catch(_) {}
+
+                    // If we are in WebApp context, prefer initData and hide widget
+                    if (tg) {
+                        var w = document.getElementById('tg-widget');
+                        if (w) w.style.display = 'none';
+                    }
+
+                    // If inside Telegram iframe but no initData yet, show instruction and skip widget
+                    if (inFrame && !hasInit) {
+                        var note = document.getElementById('tg-iframe-note');
+                        if (note) { note.classList.remove('hidden'); note.style.display = ''; }
+                        var w2 = document.getElementById('tg-widget');
+                        if (w2) { w2.style.display = 'none'; }
+                        return;
+                    }
+
+                    // Not a WebApp: keep widget visible
+                    if (!hasInit) {
+                        var w3 = document.getElementById('tg-widget');
+                        if (w3) { w3.style.display = ''; }
+                        return;
+                    }
+
+                    // Auto-login via initData
+                    console.log('[TG] Posting initData to /Account/Telegram/InitData');
+                    fetch('/Account/Telegram/InitData', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ initData: tg.initData, returnUrl: returnUrl })
+                    })
+                    .then(function(res){ return res.json().catch(function(){return {};}); })
+                    .then(function(data){
+                        console.log('[TG] InitData response:', data);
+                        if (data && data.redirect) { window.location.href = data.redirect; return; }
+                        var loginUrl = new URL('/Account/Login', window.location.origin);
+                        loginUrl.searchParams.set('returnUrl', returnUrl);
+                        if (data && data.error) { loginUrl.searchParams.set('error', data.error); }
+                        window.location.href = loginUrl.toString();
+                    })
+                    .catch(function(){
+                        console.warn('[TG] InitData POST failed');
+                        var loginUrl = new URL('/Account/Login', window.location.origin);
+                        loginUrl.searchParams.set('returnUrl', returnUrl);
+                        loginUrl.searchParams.set('error', 'server_error');
+                        window.location.href = loginUrl.toString();
+                    });
+                }
+
+                tryAutoLogin();
+                setTimeout(tryAutoLogin, 50);
+            }catch(e){ /* no-op */ }
+        })();
+    </script>
+</body>
+</html>

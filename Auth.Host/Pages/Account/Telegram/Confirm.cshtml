@@ -1,0 +1,68 @@
+@page
+@model Auth.Host.Pages.Account.Telegram.ConfirmModel
+@{
+    ViewData["Title"] = "Подтверждение пароля";
+    Layout = null;
+}
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"]</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6 bg-slate-50">
+    <div class="w-full max-w-md bg-white shadow rounded-xl p-6 space-y-6">
+        <div>
+            <h1 class="text-xl font-semibold text-slate-900">Подтверждение пароля</h1>
+            <p class="mt-1 text-sm text-slate-600">
+                Введите пароль учетной записи, чтобы продолжить привязку Telegram.
+            </p>
+        </div>
+
+        @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+        {
+            <div class="text-red-700 bg-red-50 border border-red-200 p-3 rounded">
+                @Model.ErrorMessage
+            </div>
+        }
+
+        <form method="post" class="space-y-4">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+
+            <div class="space-y-2">
+                <label class="block text-sm font-medium text-slate-700" for="password-input">Пароль</label>
+                <input
+                    id="password-input"
+                    type="password"
+                    name="Password"
+                    value="@Model.Password"
+                    class="w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring focus:ring-blue-200"
+                    autocomplete="current-password"
+                    required />
+                <span asp-validation-for="Password" class="text-sm text-red-600"></span>
+            </div>
+
+            <div asp-validation-summary="ModelOnly" class="text-sm text-red-600"></div>
+
+            <div class="flex items-center gap-3">
+                <button
+                    type="submit"
+                    class="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors">
+                    Подтвердить
+                </button>
+                <a
+                    class="flex-1 text-center rounded border border-slate-300 px-4 py-2 text-slate-600 hover:bg-slate-100 transition-colors"
+                    href="@Url.Page("/Account/Telegram/TelegramBind", new { returnUrl = Model.ReturnUrl ?? "/" })">
+                    Отмена
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <partial name="_ValidationScriptsPartial" />
+</body>
+</html>

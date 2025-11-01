@@ -1,0 +1,126 @@
+using System;
+using System.Collections.Generic;
+using System.Security.Claims;
+using Auth.Application.Interfaces;
+using Auth.Domain.Entities;
+using Auth.Host.Extensions;
+using Auth.Host.Services.Support;
+using Auth.Infrastructure;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
+using OpenIddict.Abstractions;
+
+namespace Auth.Host.Services;
+
+public sealed class SessionCookieBinder
+{
+    private readonly ISessionService _sessions;
+
+    public SessionCookieBinder(ISessionService sessions)
+    {
+        _sessions = sessions;
+    }
+
+    public async Task AttachAsync(HttpContext http, ClaimsPrincipal principal, UserEntity user, string? clientId)
+    {
+        var cookieAuth = await http.AuthenticateAsync(IdentityConstants.ApplicationScheme);
+        var rememberMe = ResolveRememberMe(cookieAuth);
+        var lifetime = rememberMe ? CustomSignInManager.LongSessionLifetime : CustomSignInManager.ShortSessionLifetime;
+
+        var ip = http.GetRealClientIp();
+        var ua = http.Request.Headers["User-Agent"].ToString();
+        var device = "web";
+        var orderedCandidates = new List<string>();
+        var knownSids = new HashSet<string>(StringComparer.Ordinal);
+
+        var claimedSid = cookieAuth?.Principal?.FindFirst("sid")?.Value;
+        if (!string.IsNullOrEmpty(claimedSid) && knownSids.Add(claimedSid))
+            orderedCandidates.Add(claimedSid);
+
+        if (http.Request.Cookies.TryGetValue(SessionCookie.Name, out var rawSid) &&
+            SessionCookie.TryUnpack(rawSid, out var cookieReference, out _))
+        {
+            if (knownSids.Add(cookieReference))
+                orderedCandidates.Insert(0, cookieReference);
+        }
+
+        SessionIssueResult? reused = null;
+        foreach (var candidate in orderedCandidates)
+        {
+            var refreshed = await _sessions.RefreshBrowserSecretAsync(candidate, user.Id);
+            if (refreshed is not null)
+            {
+                reused = refreshed;
+                break;
+            }
+        }
+
+        SessionIssueResult issued;
+        if (reused is not null)
+        {
+            issued = reused.Value;
+        }
+        else
+        {
+            issued = await _sessions.EnsureInteractiveSessionAsync(user.Id, clientId, ip, ua, device, lifetime);
+
+            foreach (var sidToRevoke in knownSids)
+            {
+                if (!string.Equals(sidToRevoke, issued.ReferenceId, StringComparison.Ordinal))
+                {
+                    await _sessions.RevokeAsync(sidToRevoke, reason: "superseded", by: user.Id.ToString());
+                }
+            }
+        }
+
+        var sid = issued.ReferenceId;
+
+        var ci = (ClaimsIdentity)principal.Identity!;
+        var sidClaim = new Claim("sid", sid);
+        ci.AddClaim(sidClaim);
+        sidClaim.SetDestinations(
+            OpenIddictConstants.Destinations.IdentityToken,
+            OpenIddictConstants.Destinations.AccessToken);
+        var existingPrincipalPersistence = ci.FindFirst(SessionClaimTypes.Persistence);
+        if (existingPrincipalPersistence is not null) ci.RemoveClaim(existingPrincipalPersistence);
+        var persistenceClaim = new Claim(SessionClaimTypes.Persistence, rememberMe ? "true" : "false");
+        ci.AddClaim(persistenceClaim);
+        persistenceClaim.SetDestinations(
+            OpenIddictConstants.Destinations.IdentityToken,
+            OpenIddictConstants.Destinations.AccessToken);
+
+        var cookieOptions = new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = SameSiteMode.Lax,
+            IsEssential = true,
+            Expires = DateTimeOffset.UtcNow.Add(lifetime)
+        };
+        http.Response.Cookies.Append(SessionCookie.Name, SessionCookie.Pack(sid, issued.BrowserSecret), cookieOptions);
+
+        if (cookieAuth?.Succeeded == true && cookieAuth.Principal?.Identity is ClaimsIdentity idCookie)
+        {
+            var existingSid = idCookie.FindFirst("sid");
+            if (existingSid is not null) idCookie.RemoveClaim(existingSid);
+            idCookie.AddClaim(new Claim("sid", sid));
+            var existingPersistence = idCookie.FindFirst(SessionClaimTypes.Persistence);
+            if (existingPersistence is not null) idCookie.RemoveClaim(existingPersistence);
+            idCookie.AddClaim(new Claim(SessionClaimTypes.Persistence, rememberMe ? "true" : "false"));
+            await http.SignInAsync(IdentityConstants.ApplicationScheme, cookieAuth.Principal, cookieAuth.Properties);
+        }
+    }
+
+    private static bool ResolveRememberMe(AuthenticateResult? cookieAuth)
+    {
+        if (cookieAuth?.Properties?.Items is { } items &&
+            items.TryGetValue(CustomSignInManager.RememberMePropertyKey, out var raw) &&
+            bool.TryParse(raw, out var rememberMe))
+        {
+            return rememberMe;
+        }
+
+        return cookieAuth?.Properties?.IsPersistent ?? true;
+    }
+}

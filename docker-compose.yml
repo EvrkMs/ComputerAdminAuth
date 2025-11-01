@@ -1,0 +1,35 @@
+services:
+  auth:
+    build:
+      context: .
+      dockerfile: Auth.Host/Dockerfile
+    image: ${AUTH_IMAGE:-auth-host:latest}
+    container_name: auth-host
+    hostname: auth-host
+    restart: always
+    user: "0:0"
+    env_file:
+      - ${AUTH_ENV_FILE:-./auth-host.env}
+    environment:
+      - TRUSTED_FORWARDERS=${TRUSTED_FORWARDERS:-nginx-cf}
+    expose:
+      - "5001"
+    volumes:
+      - auth_dataprotection:/keys/dataprotection
+      - openiddict_keys:/keys/openiddict
+    networks:
+      - data-network
+      - nginx_network
+
+networks:
+  data-network:
+    external: true
+    name: data-network
+
+  nginx_network:
+    external: true
+    name: nginx_network
+
+volumes:
+  auth_dataprotection:
+  openiddict_keys:

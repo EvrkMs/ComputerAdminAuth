@@ -1,0 +1,371 @@
+﻿@page
+@using Auth.Host.Pages.Account
+@model LoginModel
+
+@{
+    ViewData["Title"] = "Вход в систему";
+    Layout = null;
+}
+
+<!DOCTYPE html>
+<html lang="ru" class="h-full" data-theme="">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - Computer Club Auth</title>
+    <!-- Telegram WebApp script not required here anymore -->
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        @@keyframes gradient {
+            0% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+
+            100% {
+                background-position: 0% 50%;
+            }
+        }
+
+        .animated-gradient {
+            background-size: 400% 400%;
+            animation: gradient 15s ease infinite;
+        }
+
+        .glass {
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        /* Светлая тема */
+        @@media (prefers-color-scheme: light) {
+            body
+
+        {
+            background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #f5576c);
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.95);
+        }
+
+        }
+        /* Тёмная тема */
+        @@media (prefers-color-scheme: dark) {
+            body
+
+        {
+            background: linear-gradient(-45deg, #0f172a, #1e293b, #334155, #475569);
+        }
+
+        .glass {
+            background: rgba(30, 41, 59, 0.8);
+            border-color: rgba(255,255,255,0.1);
+        }
+
+        }
+
+        .input-hover {
+            transition: all 0.3s ease;
+        }
+
+            .input-hover:focus {
+                transform: translateY(-2px);
+            }
+    </style>
+</head>
+<body class="animated-gradient min-h-screen flex items-center justify-center p-4 text-gray-900 dark:text-gray-100">
+    <div class="glass w-full max-w-md rounded-2xl shadow-2xl p-8">
+
+        <button type="button" onclick="goBack()" class="absolute top-4 left-4 text-gray-700 dark:text-gray-300 hover:opacity-80 flex items-center gap-2 text-sm font-medium transition-all duration-200">
+            <i class="fas fa-arrow-left"></i>
+            Назад
+        </button>
+
+        <!-- Лого -->
+        <div class="text-center mb-8">
+            <div class="w-20 h-20 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full mx-auto mb-4 flex items-center justify-center">
+                <i class="fas fa-gamepad text-white text-3xl"></i>
+            </div>
+            <h2 class="text-3xl font-bold">Computer Club</h2>
+            <p class="mt-2 opacity-80">Система администрирования</p>
+        </div>
+
+        <!-- Форма -->
+        <form method="post" class="space-y-6">
+            @Html.AntiForgeryToken()
+            @Html.HiddenFor(m => m.ReturnUrl)
+
+            @if (!string.IsNullOrEmpty(Model?.ReturnUrl) && Model.ReturnUrl.Contains("/connect/authorize"))
+            {
+                <div class="bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-200 px-4 py-3 rounded-lg mb-4 text-sm">
+                    <i class="fas fa-info-circle mr-2"></i>
+                    Для продолжения авторизации OAuth 2.0 необходимо войти в систему
+                </div>
+            }
+
+            @if (!ViewData.ModelState.IsValid)
+            {
+                <div class="bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-200 px-4 py-3 rounded-lg text-sm">
+                    @Html.ValidationSummary(true, "", new { @class = "text-sm" })
+                </div>
+            }
+
+            <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <i class="fas fa-user text-gray-400"></i>
+                </div>
+                @Html.TextBoxFor(m => m.UserName, new {
+                @class = "input-hover block w-full pl-10 pr-3 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 bg-white/80 dark:bg-gray-800/80",
+                                placeholder = "Имя пользователя",
+                                autofocus = "autofocus"
+                                })
+                @Html.ValidationMessageFor(m => m.UserName, "", new { @class = "text-red-500 text-sm mt-1 block" })
+            </div>
+
+            <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <i class="fas fa-lock text-gray-400"></i>
+                </div>
+                @Html.PasswordFor(m => m.Password, new {
+                                @class = "input-hover block w-full pl-10 pr-10 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 bg-white/80 dark:bg-gray-800/80",
+                                placeholder = "Пароль",
+                                id = "password-input"
+                                })
+                <button type="button" onclick="togglePassword()" class="absolute inset-y-0 right-0 pr-3 flex items-center">
+                    <i id="password-toggle" class="fas fa-eye text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"></i>
+                </button>
+                @Html.ValidationMessageFor(m => m.Password, "", new { @class = "text-red-500 text-sm mt-1 block" })
+            </div>
+
+            <div class="flex items-center">
+                @Html.CheckBoxFor(m => m.RememberMe, new {
+                                @class = "h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                                })
+                @Html.LabelFor(m => m.RememberMe, new {
+                                @class = "ml-2 block text-sm cursor-pointer"
+                                })
+            </div>
+
+            <button type="submit" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold py-3 px-4 rounded-lg hover:shadow-lg transform hover:-translate-y-0.5 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2">
+                <i class="fas fa-sign-in-alt mr-2"></i>
+                Войти в систему
+            </button>
+        </form>
+
+        <div class="mt-6 text-center">
+            <div class="text-gray-600 dark:text-gray-300 mb-2">Или войдите через Telegram</div>
+            @{
+                var ru = Model?.ReturnUrl ?? "/";
+                var url = Url.Page("/Account/Telegram/TelegramLogin", null, new { returnUrl = ru }, Request.Scheme);
+                var initDataUrl = Url.Page("/Account/Telegram/InitData", null, new { returnUrl = ru }, Request.Scheme);
+            }
+            <a href="@url"
+               class="inline-flex items-center justify-center w-full bg-slate-800 text-white font-semibold py-3 px-4 rounded-lg hover:opacity-90 transition mb-3">
+                <i class="fa-brands fa-telegram mr-2"></i>
+                Войти через Telegram
+            </a>
+
+            <!-- Кнопка Login Widget (браузер) -->
+            <div id="tg-widget-container" style="display:none">
+            <script async src="https://telegram.org/js/telegram-widget.js?22"
+                    data-telegram-login="ava_smena_bot"
+                    data-size="large"
+                    data-userpic="false"
+                    data-request-access="write"
+                    data-lang="ru"
+                    data-auth-url="@url">
+            </script>
+            </div>
+
+            <!-- Кнопка WebApp (показываем только если есть initData) -->
+            <div class="mt-3">
+                <a id="tg-webapp-btn"
+                   href="@initDataUrl"
+                   class="hidden inline-flex items-center justify-center w-full bg-slate-800 text-white font-semibold py-3 px-4 rounded-lg hover:opacity-90 transition"
+                   style="display:none">
+                    <i class="fa-brands fa-telegram mr-2"></i>
+                    Войти через Telegram (WebApp)
+                </a>
+			</div>
+			<script>
+				// показываем кнопку WebApp только если есть initData
+				(function () {
+				  const btn = document.getElementById('tg-webapp-btn');
+				  try {
+					const tg = window.Telegram && window.Telegram.WebApp;
+					if (tg && tg.initData) {
+					  btn.style.display = 'inline-flex';
+					}
+				  } catch { /* ignore */ }
+				})();
+			</script>
+			<script>
+			  (function(){
+			    try{
+			      var tg = window.Telegram && window.Telegram.WebApp;
+			      if(tg && typeof tg.initData === 'string' && tg.initData.length > 0){
+			        var w = document.getElementById('tg-widget-container');
+			        var b = document.getElementById('tg-webapp-btn');
+			        if(w) w.style.display='none';
+			        if(b) b.style.display='inline-flex';
+			        // Автоматический переход на initData-логин
+			        if(b && b.href) { window.location.href = b.href; }
+			      }
+			    }catch(e){}
+			  })();
+			</script>
+            @if (Request.Query.ContainsKey("error"))
+            {
+                var error = Request.Query["error"].ToString();
+                var errorMessage = error switch
+                {
+                    "missing_fields" => "Некорректные данные от Telegram",
+                    "stale_request" => "Истек срок действия запроса. Попробуйте снова",
+                    "invalid_signature" => "Неверная подпись данных",
+                    "no_binding" => "Telegram аккаунт не привязан ни к одному пользователю",
+                    "user_not_found" => "Пользователь не найден",
+                    "user_inactive" => "Учетная запись неактивна",
+                    "server_error" => "Ошибка сервера. Обратитесь к администратору",
+                    _ => "Ошибка входа через Telegram"
+                };
+
+                <div class="bg-yellow-50 dark:bg-yellow-900 border border-yellow-200 dark:border-yellow-700 text-yellow-700 dark:text-yellow-200 px-4 py-3 rounded-lg mb-4 text-sm">
+                    <i class="fas fa-exclamation-triangle mr-2"></i>
+                    @errorMessage
+                </div>
+            }
+        </div>
+
+    </div>
+
+    <script>
+        // Telegram initData handling: prefer initData login; on binding error show widget back.
+        (function(){
+            try{
+                var tg = window.Telegram && window.Telegram.WebApp;
+                var hasInit = tg && typeof tg.initData === 'string' && tg.initData.length > 0;
+                var params = new URLSearchParams(window.location.search);
+                var err = params.get('error');
+                var widget = document.getElementById('tg-widget-container');
+                var btn = document.getElementById('tg-webapp-btn');
+
+                if(hasInit){
+                    if(err === 'user_not_found' || err === 'no_binding'){
+                        if(widget) widget.style.display = '';
+                        if(btn) btn.style.display = 'none';
+                        // Show friendly message near Telegram section
+                        try{
+                          var note = document.createElement('div');
+                          note.className = 'text-red-600 dark:text-red-300 text-sm mt-2';
+                          note.textContent = 'Пользователь с Телеграмом не найден';
+                          var anchor = widget || document.currentScript;
+                          if(anchor && anchor.parentNode){ anchor.parentNode.insertBefore(note, anchor.nextSibling); }
+                        }catch(_){ }
+                    } else {
+                        if(widget) widget.style.display = 'none';
+                        if(btn){ btn.style.display = 'inline-flex'; }
+                        // Direct POST initData to avoid navigation quirks
+                        try{
+                            var u = new URL(btn && btn.href ? btn.href : window.location.pathname, window.location.origin);
+                            var ret = u.searchParams && u.searchParams.get ? (u.searchParams.get('returnUrl') || '/') : '/';
+                            var path = u.pathname || '/Account/Telegram/InitData';
+                            fetch(path, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ initData: tg.initData, returnUrl: ret })
+                            })
+                            .then(function(res){ return res.json().catch(function(){ return {}; }); })
+                            .then(function(data){
+                                if(data && (data.error === 'user_not_found' || data.error === 'no_binding')){
+                                    if(widget) widget.style.display = '';
+                                    if(btn) btn.style.display = 'none';
+                                    try{
+                                        var note2 = document.createElement('div');
+                                        note2.className = 'text-red-600 dark:text-red-300 text-sm mt-2';
+                                        note2.textContent = 'Пользователь с Телеграмом не найден';
+                                        var anchor2 = widget || document.currentScript;
+                                        if(anchor2 && anchor2.parentNode){ anchor2.parentNode.insertBefore(note2, anchor2.nextSibling); }
+                                    }catch(_){ }
+                                    return;
+                                }
+                                if(data && data.redirect){ window.location.href = data.redirect; return; }
+                                // Unknown response -> fallback to widget
+                                if(widget) widget.style.display = '';
+                                if(btn) btn.style.display = 'none';
+                            })
+                            .catch(function(){
+                                if(widget) widget.style.display = '';
+                                if(btn) btn.style.display = 'none';
+                            });
+                        }catch(_){ if(btn && btn.href) window.location.href = btn.href; }
+                    }
+                }
+            }catch(e){}
+        })();
+
+        // Ensure button visibility toggles correctly even if initData arrives slightly later
+        (function(){
+            try{
+                var tg = window.Telegram && window.Telegram.WebApp;
+                if(tg && typeof tg.ready === 'function') { tg.ready(); }
+                var params = new URLSearchParams(window.location.search);
+                var err = params.get('error');
+                var widget = document.getElementById('tg-widget-container');
+                var btn = document.getElementById('tg-webapp-btn');
+                if(!btn) return;
+
+                function showBtn(){ btn.classList.remove('hidden'); btn.style.display='inline-flex'; }
+                function hideBtn(){ btn.style.display='none'; btn.classList.add('hidden'); }
+
+                var hasInit = tg && typeof tg.initData === 'string' && tg.initData.length > 0;
+                if(err === 'user_not_found' || err === 'no_binding'){
+                    if(widget) widget.style.display='';
+                    hideBtn();
+                    return;
+                }
+                if(hasInit){
+                    if(widget) widget.style.display='none';
+                    showBtn();
+                }
+            }catch(e){}
+        })();
+        function togglePassword() {
+            const passwordInput = document.getElementById('password-input');
+            const passwordToggle = document.getElementById('password-toggle');
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                passwordToggle.classList.replace('fa-eye', 'fa-eye-slash');
+            } else {
+                passwordInput.type = 'password';
+                passwordToggle.classList.replace('fa-eye-slash', 'fa-eye');
+            }
+        }
+        function goBack() {
+            const encoded = '@Html.Raw(Model?.ReturnUrl ?? "")';
+            if (encoded) {
+                try {
+                    const qIndex = encoded.indexOf('?');
+                    if (qIndex !== -1) {
+                        const query = encoded.slice(qIndex + 1);
+                        const params = new URLSearchParams(query);
+                        const redirectUri = params.get('redirect_uri');
+                        if (redirectUri) {
+                            window.location.href = new URL(decodeURIComponent(redirectUri)).origin;
+                            return;
+                        }
+                    }
+                } catch {}
+            }
+            history.back();
+        }
+    </script>
+</body>
+</html>

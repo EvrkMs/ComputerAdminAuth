@@ -1,0 +1,18 @@
+﻿@page
+@using Auth.Host.Pages.Account
+@model LogoutModel
+@{
+}
+
+@if (Model.AutomaticRedirectAfterSignOut && ViewData["PostLogoutRedirectUri"] != null)
+{
+    <meta http-equiv="refresh" content="0;url=@ViewData["PostLogoutRedirectUri"]" />
+}
+
+<h1>Вы вышли из системы</h1>
+<p>Спасибо, что воспользовались приложением.</p>
+
+@if (ViewData["PostLogoutRedirectUri"] != null)
+{
+    <a href="@ViewData["PostLogoutRedirectUri"]">Вернуться в приложение</a>
+}
