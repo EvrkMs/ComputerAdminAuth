@@ -9,7 +9,7 @@ services:
     restart: always
     user: "0:0"
     env_file:
-      - ${AUTH_ENV_FILE:-./auth-host.env}
+      - ${AUTH_ENV_FILE:-../auth-host.env}
     environment:
       - TRUSTED_FORWARDERS=${TRUSTED_FORWARDERS:-nginx-cf}
     expose:
