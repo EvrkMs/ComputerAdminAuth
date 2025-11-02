@@ -39,3 +39,4 @@ public sealed record ChangePasswordInput(
     bool RequireChangeOnNextLogin);
 
 public sealed record CreateRoleInput(string Name);
+public sealed record UpdateRoleInput(string Name);

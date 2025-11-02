@@ -111,6 +111,28 @@ public class CrudUserController : ControllerBase
         return CreatedAtAction(nameof(GetRoles), new { }, result.Value);
     }
 
+    [HttpPut("roles/{id:guid}")]
+    public async Task<ActionResult<RoleDto>> UpdateRole(Guid id, [FromBody] UpdateRoleRequest req, CancellationToken ct = default)
+    {
+        if (!ModelState.IsValid) return ValidationProblem(ModelState);
+
+        var result = await _users.UpdateRoleAsync(id, new UpdateRoleInput(req.Name), ct);
+        if (!result.Success)
+            return Failure(result);
+
+        return Ok(result.Value);
+    }
+
+    [HttpDelete("roles/{id:guid}")]
+    public async Task<IActionResult> DeleteRole(Guid id, CancellationToken ct = default)
+    {
+        var result = await _users.DeleteRoleAsync(id, ct);
+        if (!result.Success)
+            return Failure(result);
+
+        return NoContent();
+    }
+
     private ActionResult<T> Failure<T>(OperationResult<T> result)
     {
         if (result.ValidationErrors is not null)
@@ -183,6 +205,13 @@ public record ChangePasswordRequest
 }
 
 public record CreateRoleRequest
+{
+    [Required, MinLength(2)]
+    [MaxLength(64)]
+    public string Name { get; init; } = string.Empty;
+}
+
+public record UpdateRoleRequest
 {
     [Required, MinLength(2)]
     [MaxLength(64)]

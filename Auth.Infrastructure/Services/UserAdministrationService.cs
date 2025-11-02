@@ -258,6 +258,66 @@ public sealed class UserAdministrationService : IUserAdministrationService
         return OperationResult<RoleDto>.Ok(new RoleDto(role.Id, role.Name ?? name));
     }
 
+    public async Task<OperationResult<RoleDto>> UpdateRoleAsync(Guid id, UpdateRoleInput input, CancellationToken ct = default)
+    {
+        var validationErrors = ValidateRoleName(input.Name);
+        if (validationErrors is not null)
+            return OperationResult<RoleDto>.Validation(validationErrors);
+
+        var role = await _roleManager.Roles.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (role is null)
+            return OperationResult<RoleDto>.Fail("not_found");
+
+        var trimmed = input.Name.Trim();
+        var normalized = _roleManager.NormalizeKey(trimmed) ?? trimmed.ToUpperInvariant();
+
+        var exists = await _roleManager.Roles
+            .AsNoTracking()
+            .AnyAsync(r => r.NormalizedName == normalized && r.Id != id, ct);
+
+        if (exists)
+        {
+            return OperationResult<RoleDto>.Validation(new Dictionary<string, string[]>
+            {
+                ["Name"] = new[] {$"Роль '{trimmed}' уже существует."}
+            });
+        }
+
+        role.Name = trimmed;
+        role.NormalizedName = normalized;
+
+        var updateResult = await _roleManager.UpdateAsync(role);
+        if (!updateResult.Succeeded)
+            return OperationResult<RoleDto>.Validation(ToValidationDictionary(updateResult.Errors));
+
+        return OperationResult<RoleDto>.Ok(new RoleDto(role.Id, role.Name ?? trimmed));
+    }
+
+    public async Task<OperationResult> DeleteRoleAsync(Guid id, CancellationToken ct = default)
+    {
+        var role = await _roleManager.Roles.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (role is null)
+            return OperationResult.Fail("not_found");
+
+        if (string.Equals(role.Name, "Root", StringComparison.OrdinalIgnoreCase))
+            return OperationResult.Fail("Нельзя удалить системную роль Root.");
+
+        var assigned = await _db.UserRoles.AnyAsync(ur => ur.RoleId == id, ct);
+        if (assigned)
+        {
+            return OperationResult.Validation(new Dictionary<string, string[]>
+            {
+                ["Role"] = new[] {"Нельзя удалить роль, назначенную пользователям."}
+            });
+        }
+
+        var deleteResult = await _roleManager.DeleteAsync(role);
+        if (!deleteResult.Succeeded)
+            return OperationResult.Validation(ToValidationDictionary(deleteResult.Errors));
+
+        return OperationResult.Ok();
+    }
+
     private async Task<OperationResult<string[]>> ResolveRolesAsync(IReadOnlyCollection<string>? requestedRoles, CancellationToken ct)
     {
         if (requestedRoles is null || requestedRoles.Count == 0)

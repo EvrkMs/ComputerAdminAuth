@@ -11,4 +11,6 @@ public interface IUserAdministrationService
     Task<OperationResult<UserListItemDto>> UpdateAsync(Guid id, UpdateUserInput input, CancellationToken ct = default);
     Task<OperationResult> ChangePasswordAsync(Guid id, ChangePasswordInput input, CancellationToken ct = default);
     Task<OperationResult<RoleDto>> CreateRoleAsync(CreateRoleInput input, CancellationToken ct = default);
+    Task<OperationResult<RoleDto>> UpdateRoleAsync(Guid id, UpdateRoleInput input, CancellationToken ct = default);
+    Task<OperationResult> DeleteRoleAsync(Guid id, CancellationToken ct = default);
 }
