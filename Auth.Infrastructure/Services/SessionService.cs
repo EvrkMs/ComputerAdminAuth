@@ -159,6 +159,18 @@ public class SessionService : ISessionService
         return new SessionValidationResult(session.Id, session.UserId, session.CreatedAt, session.ExpiresAt, session.Revoked);
     }
 
+    public async Task<string?> GetActiveReferenceByAuthorizationIdAsync(string authorizationId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(authorizationId))
+            return null;
+
+        var session = await _repo.GetByAuthorizationIdAsync(authorizationId, ct);
+        if (session is null)
+            return null;
+
+        return IsSessionCurrentlyActive(session) ? session.ReferenceId : null;
+    }
+
     private static bool IsSessionCurrentlyActive(UserSession session)
     {
         if (session.Revoked)

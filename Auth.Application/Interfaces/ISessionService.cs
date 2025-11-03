@@ -26,6 +26,7 @@ public interface ISessionService
     /// Returns session metadata when successful, otherwise null.
     /// </summary>
     Task<SessionValidationResult?> ValidateBrowserSessionAsync(string referenceId, string secret, bool requireActive = true, CancellationToken ct = default);
+    Task<string?> GetActiveReferenceByAuthorizationIdAsync(string authorizationId, CancellationToken ct = default);
 }
 
 public readonly record struct SessionIssueResult(string ReferenceId, string BrowserSecret, DateTime CreatedAt, DateTime? ExpiresAt);

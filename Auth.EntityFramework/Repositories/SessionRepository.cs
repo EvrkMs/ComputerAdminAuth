@@ -20,6 +20,9 @@ public class SessionRepository(AppDbContext db) : ISessionRepository
             (s.ExpiresAt == null || s.ExpiresAt > DateTime.UtcNow),
             ct);
 
+    public async Task<UserSession?> GetByAuthorizationIdAsync(string authorizationId, CancellationToken ct = default)
+        => await db.UserSessions.FirstOrDefaultAsync(s => s.AuthorizationId == authorizationId, ct);
+
     public async Task<UserSession> AddAsync(UserSession session, CancellationToken ct = default)
     {
         await db.UserSessions.AddAsync(session, ct);

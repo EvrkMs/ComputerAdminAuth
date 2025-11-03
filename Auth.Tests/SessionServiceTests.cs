@@ -170,6 +170,29 @@ public sealed class SessionServiceTests : IDisposable
         Assert.Null(validation);
     }
 
+    [Fact]
+    public async Task GetActiveReferenceByAuthorizationIdAsync_ReturnsReference_WhenActive()
+    {
+        var issued = await _service.EnsureInteractiveSessionAsync(
+            Guid.NewGuid(),
+            clientId: "test-client",
+            ip: "127.0.0.1",
+            userAgent: "testsuite",
+            device: "unit-test",
+            absoluteLifetime: TimeSpan.FromMinutes(30));
+
+        var authorizationId = Guid.NewGuid().ToString();
+        await _service.LinkAuthorizationAsync(issued.ReferenceId, authorizationId);
+
+        var resolved = await _service.GetActiveReferenceByAuthorizationIdAsync(authorizationId);
+        Assert.Equal(issued.ReferenceId, resolved);
+
+        await _service.RevokeAsync(issued.ReferenceId);
+
+        var afterRevoke = await _service.GetActiveReferenceByAuthorizationIdAsync(authorizationId);
+        Assert.Null(afterRevoke);
+    }
+
     private static IAsyncEnumerable<object> EmptyTokens()
     {
         return Inner();
