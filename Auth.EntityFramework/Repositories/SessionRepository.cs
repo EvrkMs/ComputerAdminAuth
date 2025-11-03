@@ -8,20 +8,30 @@ namespace Auth.EntityFramework.Repositories;
 public class SessionRepository(AppDbContext db) : ISessionRepository
 {
     public async Task<UserSession?> GetAsync(Guid id, CancellationToken ct = default)
-        => await db.UserSessions.FirstOrDefaultAsync(s => s.Id == id, ct);
+        => await db.UserSessions
+            .Include(s => s.Authorizations)
+            .FirstOrDefaultAsync(s => s.Id == id, ct);
 
     public async Task<UserSession?> GetByReferenceAsync(string referenceId, CancellationToken ct = default)
-        => await db.UserSessions.FirstOrDefaultAsync(s => s.ReferenceId == referenceId, ct);
+        => await db.UserSessions
+            .Include(s => s.Authorizations)
+            .FirstOrDefaultAsync(s => s.ReferenceId == referenceId, ct);
 
     public async Task<UserSession?> GetActiveByReferenceAsync(string referenceId, CancellationToken ct = default)
-        => await db.UserSessions.FirstOrDefaultAsync(s =>
-            s.ReferenceId == referenceId &&
-            !s.Revoked &&
-            (s.ExpiresAt == null || s.ExpiresAt > DateTime.UtcNow),
-            ct);
+        => await db.UserSessions
+            .Include(s => s.Authorizations)
+            .FirstOrDefaultAsync(s =>
+                s.ReferenceId == referenceId &&
+                !s.Revoked &&
+                (s.ExpiresAt == null || s.ExpiresAt > DateTime.UtcNow),
+                ct);
 
     public async Task<UserSession?> GetByAuthorizationIdAsync(string authorizationId, CancellationToken ct = default)
-        => await db.UserSessions.FirstOrDefaultAsync(s => s.AuthorizationId == authorizationId, ct);
+        => await db.UserSessions
+            .Include(s => s.Authorizations)
+            .FirstOrDefaultAsync(s =>
+                s.AuthorizationId == authorizationId ||
+                s.Authorizations.Any(a => a.AuthorizationId == authorizationId), ct);
 
     public async Task<UserSession> AddAsync(UserSession session, CancellationToken ct = default)
     {

@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Auth.EntityFramework.Data;
 using Auth.EntityFramework.Repositories;
 using Auth.Infrastructure.Data;
@@ -18,6 +20,7 @@ public sealed class SessionServiceTests : IDisposable
     private readonly UnitOfWork _unitOfWork;
     private readonly Mock<IOpenIddictAuthorizationManager> _authorizationManager;
     private readonly Mock<IOpenIddictTokenManager> _tokenManager;
+    private readonly List<string> _revokedAuthorizationIds = [];
 
     public SessionServiceTests()
     {
@@ -33,10 +36,15 @@ public sealed class SessionServiceTests : IDisposable
         _authorizationManager = new Mock<IOpenIddictAuthorizationManager>(MockBehavior.Loose);
         _authorizationManager
             .Setup(m => m.FindByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(new ValueTask<object?>(result: null));
+            .Returns<string, CancellationToken>((id, _) => new ValueTask<object?>(id));
         _authorizationManager
             .Setup(m => m.TryRevokeAsync(It.IsAny<object>(), It.IsAny<CancellationToken>()))
-            .Returns(new ValueTask<bool>(true));
+            .Returns(new ValueTask<bool>(true))
+            .Callback<object, CancellationToken>((auth, _) =>
+            {
+                if (auth is string id)
+                    _revokedAuthorizationIds.Add(id);
+            });
 
         _tokenManager = new Mock<IOpenIddictTokenManager>(MockBehavior.Loose);
         _tokenManager
@@ -94,8 +102,12 @@ public sealed class SessionServiceTests : IDisposable
         Assert.Null(await _service.ValidateBrowserSessionAsync(issued.ReferenceId, issued.BrowserSecret));
         Assert.True((await _service.ValidateBrowserSessionAsync(issued.ReferenceId, rotated.Value.BrowserSecret)).HasValue);
 
-        var linked = await _service.LinkAuthorizationAsync(issued.ReferenceId, "auth-id");
+        var authorizationId = "auth-id";
+        var linked = await _service.LinkAuthorizationAsync(issued.ReferenceId, authorizationId);
         Assert.True(linked);
+        var linkRow = await _db.UserSessionAuthorizations.SingleAsync();
+        Assert.Equal(stored!.Id, linkRow.SessionId);
+        Assert.Equal(authorizationId, linkRow.AuthorizationId);
 
         var revoked = await _service.RevokeAsync(issued.ReferenceId, reason: "unit-test", by: "tester");
         Assert.True(revoked);
@@ -191,6 +203,35 @@ public sealed class SessionServiceTests : IDisposable
 
         var afterRevoke = await _service.GetActiveReferenceByAuthorizationIdAsync(authorizationId);
         Assert.Null(afterRevoke);
+    }
+
+    [Fact]
+    public async Task RevokeAsync_CascadesToAllLinkedAuthorizations()
+    {
+        var issued = await _service.EnsureInteractiveSessionAsync(
+            Guid.NewGuid(),
+            clientId: "test-client",
+            ip: "127.0.0.1",
+            userAgent: "testsuite",
+            device: "unit-test",
+            absoluteLifetime: TimeSpan.FromMinutes(30));
+
+        var firstAuth = Guid.NewGuid().ToString();
+        var secondAuth = Guid.NewGuid().ToString();
+
+        await _service.LinkAuthorizationAsync(issued.ReferenceId, firstAuth);
+        await _service.LinkAuthorizationAsync(issued.ReferenceId, secondAuth);
+
+        var session = await _repository.GetByReferenceAsync(issued.ReferenceId);
+        Assert.NotNull(session);
+        Assert.Contains(session!.Authorizations, x => x.AuthorizationId == firstAuth);
+        Assert.Contains(session.Authorizations, x => x.AuthorizationId == secondAuth);
+
+        _revokedAuthorizationIds.Clear();
+        var revoked = await _service.RevokeAsync(issued.ReferenceId, reason: "cascade-test");
+        Assert.True(revoked);
+        Assert.Contains(firstAuth, _revokedAuthorizationIds);
+        Assert.Contains(secondAuth, _revokedAuthorizationIds);
     }
 
     private static IAsyncEnumerable<object> EmptyTokens()

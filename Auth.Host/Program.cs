@@ -263,8 +263,6 @@ app.Use(async (context, next) =>
 });
 app.UseCors(CorsPolicies.Ava);
 app.UseAuthentication();
-// Reject API calls if the DB session (sid) is revoked
-app.UseSessionRevocationValidation();
 app.UseAuthorization();
 
 // Log slow requests to spot intermittent stalls

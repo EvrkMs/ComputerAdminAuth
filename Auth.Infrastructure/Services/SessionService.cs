@@ -3,6 +3,8 @@ using Auth.Domain.Entities;
 using Auth.EntityFramework.Data;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -105,10 +107,22 @@ public class SessionService : ISessionService
             await _unitOfWork.SaveChangesAsync(innerCt);
         }, ct);
 
-        // Cascade revoke: if authorization id is known, use OpenIddict managers
+        // Cascade revoke all linked authorizations (session may be tied to multiple grants)
+        var authorizationIds = new HashSet<string>(StringComparer.Ordinal);
         if (!string.IsNullOrWhiteSpace(s.AuthorizationId))
+            authorizationIds.Add(s.AuthorizationId!);
+        foreach (var link in s.Authorizations)
         {
-            await RevokeByAuthorizationIdAsync(s.AuthorizationId!, ct);
+            if (!string.IsNullOrWhiteSpace(link.AuthorizationId))
+                authorizationIds.Add(link.AuthorizationId);
+        }
+
+        if (authorizationIds.Count > 0)
+        {
+            foreach (var authId in authorizationIds)
+            {
+                await RevokeByAuthorizationIdAsync(authId, ct);
+            }
         }
         else
         {
@@ -225,15 +239,61 @@ public class SessionService : ISessionService
         }
     }
 
-    public async Task<bool> LinkAuthorizationAsync(string referenceId, string authorizationId, CancellationToken ct = default)
+    public async Task<bool> LinkAuthorizationAsync(string referenceId, string authorizationId, string? clientId = null, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(referenceId)) return false;
-        var s = await _repo.GetByReferenceAsync(referenceId, ct);
-        if (s is null) return false;
-        if (!string.IsNullOrEmpty(s.AuthorizationId)) return true; // already linked
-        s.AuthorizationId = authorizationId;
-        await _repo.UpdateAsync(s, ct);
-        await _unitOfWork.SaveChangesAsync(ct);
+        if (string.IsNullOrWhiteSpace(referenceId) || string.IsNullOrWhiteSpace(authorizationId))
+            return false;
+
+        var session = await _repo.GetByReferenceAsync(referenceId, ct);
+        if (session is null) return false;
+
+        var linkedAlready = session.Authorizations.Any(a => string.Equals(a.AuthorizationId, authorizationId, StringComparison.Ordinal));
+        var newLink = linkedAlready ? null : new UserSessionAuthorization
+        {
+            SessionId = session.Id,
+            AuthorizationId = authorizationId,
+            ClientId = clientId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        var touched = false;
+
+        if (string.IsNullOrEmpty(session.AuthorizationId))
+        {
+            session.AuthorizationId = authorizationId;
+            touched = true;
+        }
+
+        if (newLink is not null)
+        {
+            session.Authorizations.Add(newLink);
+            _db.UserSessionAuthorizations.Add(newLink);
+            touched = true;
+        }
+
+        if (!touched)
+            return true;
+
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            if (newLink is not null)
+                _db.Entry(newLink).State = EntityState.Detached;
+
+            var refreshed = await _repo.GetByReferenceAsync(referenceId, ct);
+            if (refreshed is not null &&
+                (string.Equals(refreshed.AuthorizationId, authorizationId, StringComparison.Ordinal) ||
+                 refreshed.Authorizations.Any(a => string.Equals(a.AuthorizationId, authorizationId, StringComparison.Ordinal))))
+            {
+                return true;
+            }
+
+            throw;
+        }
+
         return true;
     }
 

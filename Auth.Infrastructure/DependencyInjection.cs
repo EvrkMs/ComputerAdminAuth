@@ -4,7 +4,6 @@ using Auth.Domain.Entities;
 using Auth.EntityFramework.Data;
 using Auth.EntityFramework.Repositories;
 using Auth.Infrastructure.Data;
-using Auth.Infrastructure.OpenIddict;
 using Auth.Infrastructure.Services;
 using Auth.Shared.Contracts;
 using Auth.TelegramAuth.Interface;
@@ -186,11 +185,6 @@ public static class DependencyInjection
             .EnableUserInfoEndpointPassthrough()
             .EnableEndSessionEndpointPassthrough()
             .EnableStatusCodePagesIntegration();
-
-        opt.AddEventHandler<OpenIddictServerEvents.HandleIntrospectionRequestContext>(builder =>
-            builder.UseScopedHandler<EnsureSessionActiveForIntrospection>()
-                .SetOrder(OpenIddictServerHandlers.Introspection.AttachMetadataClaims.Descriptor.Order - 500)
-                .SetType(OpenIddictServerHandlerType.Custom));
 
         ConfigureSigningCertificates(opt, config);
 

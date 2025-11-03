@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
+using System.Linq;
 using System.Security.Claims;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -171,7 +172,7 @@ public class AuthorizationInteractionService
                     // Link authorization to current DB session for cascade token revocation
                     var sidVal = principal.GetClaim("sid");
                     if (!string.IsNullOrEmpty(sidVal))
-                        await _sessions.LinkAuthorizationAsync(sidVal, authId);
+                        await _sessions.LinkAuthorizationAsync(sidVal, authId, request.ClientId);
 
                     return controller.SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
                 }
@@ -199,7 +200,7 @@ public class AuthorizationInteractionService
                     // Link the current sid to the authorization for precise revocation later
                     var sidVal = consentPrincipal.GetClaim("sid");
                     if (!string.IsNullOrEmpty(sidVal))
-                        await _sessions.LinkAuthorizationAsync(sidVal, authId);
+                        await _sessions.LinkAuthorizationAsync(sidVal, authId, request.ClientId);
 
                     return controller.SignIn(consentPrincipal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
                 }
@@ -252,7 +253,7 @@ public class AuthorizationInteractionService
                 principal.SetAuthorizationId(originalAuthId);
                 // Ensure session<->authorization link exists for reliable revocation
                 if (!string.IsNullOrEmpty(sid))
-                    await _sessions.LinkAuthorizationAsync(sid, originalAuthId);
+                    await _sessions.LinkAuthorizationAsync(sid, originalAuthId, request.ClientId);
             }
             if (string.IsNullOrEmpty(sid))
             {
@@ -274,17 +275,27 @@ public class AuthorizationInteractionService
             else
             {
                 var ci = (ClaimsIdentity)principal.Identity!;
-                var sidClaim = new Claim("sid", sid);
+                foreach (var existingSid in ci.FindAll("sid").ToArray())
+                    ci.RemoveClaim(existingSid);
+
+                var originalSidClaim = result.Principal!.Claims.FirstOrDefault(c => c.Type == "sid");
+                var sidClaim = CloneClaim(originalSidClaim, "sid", sid);
                 ci.AddClaim(sidClaim);
-                // Ensure "sid" is emitted into id_token/access_token
+                // Ensure "sid" is emitted into id_token/access_token/refresh_token payloads
                 sidClaim.SetDestinations(
                     OpenIddictConstants.Destinations.IdentityToken,
                     OpenIddictConstants.Destinations.AccessToken,
                     "authorization_code",
                     "refresh_token");
+
                 var persistedValue = result.Principal!.GetClaim(SessionClaimTypes.Persistence);
                 var isPersistentSession = ParsePersistenceClaim(persistedValue);
-                var persistenceClaim = new Claim(SessionClaimTypes.Persistence, isPersistentSession ? "true" : "false");
+
+                foreach (var existingPersistence in ci.FindAll(SessionClaimTypes.Persistence).ToArray())
+                    ci.RemoveClaim(existingPersistence);
+
+                var originalPersistenceClaim = result.Principal!.Claims.FirstOrDefault(c => c.Type == SessionClaimTypes.Persistence);
+                var persistenceClaim = CloneClaim(originalPersistenceClaim, SessionClaimTypes.Persistence, isPersistentSession ? "true" : "false");
                 ci.AddClaim(persistenceClaim);
                 persistenceClaim.SetDestinations(
                     OpenIddictConstants.Destinations.IdentityToken,
@@ -317,6 +328,19 @@ public class AuthorizationInteractionService
         }
 
         throw new InvalidOperationException("The specified grant type is not supported.");
+    }
+
+    private static Claim CloneClaim(Claim? source, string type, string value)
+    {
+        if (source is null)
+            return new Claim(type, value);
+
+        var clone = new Claim(source.Type, value, source.ValueType, source.Issuer, source.OriginalIssuer);
+        foreach (var kvp in source.Properties)
+        {
+            clone.Properties[kvp.Key] = kvp.Value;
+        }
+        return clone;
     }
 
     public async Task<IActionResult> HandleUserInfoAsync(ControllerBase controller)

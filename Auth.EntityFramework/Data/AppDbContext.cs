@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> opt)
 {
     public DbSet<TelegramEntity> TelegramEntities => Set<TelegramEntity>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
+    public DbSet<UserSessionAuthorization> UserSessionAuthorizations => Set<UserSessionAuthorization>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

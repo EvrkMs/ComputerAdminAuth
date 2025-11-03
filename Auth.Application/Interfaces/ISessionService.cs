@@ -18,7 +18,7 @@ public interface ISessionService
 
     Task<bool> RevokeAsync(string referenceId, string? reason = null, string? by = null, CancellationToken ct = default);
     Task<bool> IsActiveAsync(string referenceId, CancellationToken ct = default);
-    Task<bool> LinkAuthorizationAsync(string referenceId, string authorizationId, CancellationToken ct = default);
+    Task<bool> LinkAuthorizationAsync(string referenceId, string authorizationId, string? clientId = null, CancellationToken ct = default);
     Task<SessionIssueResult?> RefreshBrowserSecretAsync(string referenceId, Guid expectedUserId, CancellationToken ct = default);
 
     /// <summary>

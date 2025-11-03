@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 
 namespace Auth.Domain.Entities;
@@ -54,4 +55,6 @@ public class UserSession
 
     // Link to OpenIddict authorization (for precise token revocation)
     public string? AuthorizationId { get; set; }
+
+    public ICollection<UserSessionAuthorization> Authorizations { get; set; } = new HashSet<UserSessionAuthorization>();
 }
