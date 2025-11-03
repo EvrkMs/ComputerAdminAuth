@@ -279,14 +279,18 @@ public class AuthorizationInteractionService
                 // Ensure "sid" is emitted into id_token/access_token
                 sidClaim.SetDestinations(
                     OpenIddictConstants.Destinations.IdentityToken,
-                    OpenIddictConstants.Destinations.AccessToken);
+                    OpenIddictConstants.Destinations.AccessToken,
+                    "authorization_code",
+                    "refresh_token");
                 var persistedValue = result.Principal!.GetClaim(SessionClaimTypes.Persistence);
                 var isPersistentSession = ParsePersistenceClaim(persistedValue);
                 var persistenceClaim = new Claim(SessionClaimTypes.Persistence, isPersistentSession ? "true" : "false");
                 ci.AddClaim(persistenceClaim);
                 persistenceClaim.SetDestinations(
                     OpenIddictConstants.Destinations.IdentityToken,
-                    OpenIddictConstants.Destinations.AccessToken);
+                    OpenIddictConstants.Destinations.AccessToken,
+                    "authorization_code",
+                    "refresh_token");
 
                 if (isPersistentSession)
                 {

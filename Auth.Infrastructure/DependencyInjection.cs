@@ -178,6 +178,8 @@ public static class DependencyInjection
         opt.RegisterScopes("openid", "profile",
             ApiScopes.Api, ApiScopes.ApiRead, ApiScopes.ApiWrite, "offline_access");
 
+        opt.RegisterClaims("sid");
+
         opt.UseAspNetCore()
             .EnableAuthorizationEndpointPassthrough()
             .EnableTokenEndpointPassthrough()
@@ -185,12 +187,10 @@ public static class DependencyInjection
             .EnableEndSessionEndpointPassthrough()
             .EnableStatusCodePagesIntegration();
 
-        opt.AddEventHandler<global::OpenIddict.Server.OpenIddictServerEvents.HandleIntrospectionRequestContext>(builder =>
-        {
+        opt.AddEventHandler<OpenIddictServerEvents.HandleIntrospectionRequestContext>(builder =>
             builder.UseScopedHandler<EnsureSessionActiveForIntrospection>()
-                .SetOrder(global::OpenIddict.Server.OpenIddictServerHandlers.Introspection.AttachMetadataClaims.Descriptor.Order - 500)
-                .SetType(global::OpenIddict.Server.OpenIddictServerHandlerType.Custom);
-        });
+                .SetOrder(OpenIddictServerHandlers.Introspection.AttachMetadataClaims.Descriptor.Order - 500)
+                .SetType(OpenIddictServerHandlerType.Custom));
 
         ConfigureSigningCertificates(opt, config);
 

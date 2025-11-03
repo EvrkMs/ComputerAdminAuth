@@ -77,18 +77,24 @@ public sealed class SessionCookieBinder
         var sid = issued.ReferenceId;
 
         var ci = (ClaimsIdentity)principal.Identity!;
+        var existingSidClaim = ci.FindFirst("sid");
+        if (existingSidClaim is not null) ci.RemoveClaim(existingSidClaim);
         var sidClaim = new Claim("sid", sid);
-        ci.AddClaim(sidClaim);
         sidClaim.SetDestinations(
             OpenIddictConstants.Destinations.IdentityToken,
-            OpenIddictConstants.Destinations.AccessToken);
+            OpenIddictConstants.Destinations.AccessToken,
+            "authorization_code",
+            "refresh_token");
+        ci.AddClaim(sidClaim);
         var existingPrincipalPersistence = ci.FindFirst(SessionClaimTypes.Persistence);
         if (existingPrincipalPersistence is not null) ci.RemoveClaim(existingPrincipalPersistence);
         var persistenceClaim = new Claim(SessionClaimTypes.Persistence, rememberMe ? "true" : "false");
         ci.AddClaim(persistenceClaim);
         persistenceClaim.SetDestinations(
             OpenIddictConstants.Destinations.IdentityToken,
-            OpenIddictConstants.Destinations.AccessToken);
+            OpenIddictConstants.Destinations.AccessToken,
+            "authorization_code",
+            "refresh_token");
 
         var cookieOptions = new CookieOptions
         {

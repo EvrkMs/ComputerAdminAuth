@@ -44,11 +44,11 @@ public sealed class EnsureSessionActiveForIntrospection
         var sid = principal.GetClaim("sid");
         if (string.IsNullOrEmpty(sid))
         {
-            _logger.LogWarning("Introspection rejected: token {TokenId} is missing sid for subject {Subject}.", context.TokenId, subject);
+            var claimsDump = string.Join(", ", principal.Claims.Select(c => $"{c.Type}={c.Value}"));
+            _logger.LogWarning("Introspection rejected: token {TokenId} is missing sid for subject {Subject}. Claims: {Claims}", context.TokenId, subject, claimsDump);
             context.Reject(
                 error: OpenIddictConstants.Errors.InvalidToken,
-                description: "The token is not bound to an active session.",
-                uri: null);
+                description: "The interactive session identifier (sid) is required.");
             return;
         }
 
@@ -59,7 +59,6 @@ public sealed class EnsureSessionActiveForIntrospection
         _logger.LogInformation("Introspection rejected: sid {Sid} associated with token {TokenId} is inactive.", sid, context.TokenId);
         context.Reject(
             error: OpenIddictConstants.Errors.InvalidToken,
-            description: "The session associated with this token is no longer active.",
-            uri: null);
+            description: "The interactive session referenced by sid is no longer active.");
     }
 }
