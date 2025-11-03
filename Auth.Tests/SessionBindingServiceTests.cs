@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace Auth.Tests;
@@ -56,7 +57,7 @@ public class SessionBindingServiceTests
             .ReturnsAsync(new SessionIssueResult(issuedSid, issuedSecret, DateTime.UtcNow, issuedExpires));
 
         var signInManager = IdentityTestHelper.CreateSignInManager();
-        var guard = new SessionCookieGuard(sessionService.Object, signInManager);
+        var guard = new SessionCookieGuard(sessionService.Object, signInManager, NullLogger<SessionCookieGuard>.Instance);
         var binder = new SessionCookieBinder(sessionService.Object);
         var service = new SessionBindingService(guard, binder);
 

@@ -85,6 +85,10 @@ public sealed class SessionServiceTests : IDisposable
         Assert.NotNull(stored);
         Assert.Equal(userId, stored!.UserId);
         Assert.NotEqual(issued.BrowserSecret, stored.SecretHash);
+        Assert.NotNull(stored.SecretExpiresAt);
+        Assert.True(stored.SecretExpiresAt > DateTime.UtcNow.AddMinutes(-1));
+
+        var previousLastSeen = stored.LastSeenAt;
 
         var validation = await _service.ValidateBrowserSessionAsync(issued.ReferenceId, issued.BrowserSecret);
         Assert.True(validation.HasValue);
@@ -92,12 +96,17 @@ public sealed class SessionServiceTests : IDisposable
 
         var wrong = await _service.ValidateBrowserSessionAsync(issued.ReferenceId, "not-the-secret");
         Assert.Null(wrong);
+        Assert.NotNull(stored.LastSeenAt);
+        Assert.True(stored.LastSeenAt > previousLastSeen);
 
         var rotated = await _service.RefreshBrowserSecretAsync(issued.ReferenceId, userId);
         Assert.NotNull(rotated);
         Assert.NotEqual(issued.BrowserSecret, rotated!.Value.BrowserSecret);
         Assert.Equal(issued.CreatedAt, rotated.Value.CreatedAt);
         Assert.Equal(issued.ExpiresAt, rotated.Value.ExpiresAt);
+
+        Assert.NotNull(stored.SecretExpiresAt);
+        Assert.True(stored.SecretExpiresAt > DateTime.UtcNow);
 
         Assert.Null(await _service.ValidateBrowserSessionAsync(issued.ReferenceId, issued.BrowserSecret));
         Assert.True((await _service.ValidateBrowserSessionAsync(issued.ReferenceId, rotated.Value.BrowserSecret)).HasValue);
@@ -138,6 +147,30 @@ public sealed class SessionServiceTests : IDisposable
         var relaxed = await _service.ValidateBrowserSessionAsync(issued.ReferenceId, issued.BrowserSecret, requireActive: false);
         Assert.True(relaxed.HasValue);
         Assert.Equal(stored.Id, relaxed!.Value.SessionId);
+    }
+
+    [Fact]
+    public async Task ValidateBrowserSessionAsync_ReturnsNull_WhenSecretExpired()
+    {
+        var issued = await _service.EnsureInteractiveSessionAsync(
+            Guid.NewGuid(),
+            clientId: "test-client",
+            ip: "127.0.0.1",
+            userAgent: "testsuite",
+            device: "unit-test",
+            absoluteLifetime: TimeSpan.FromMinutes(30));
+
+        var stored = await _repository.GetByReferenceAsync(issued.ReferenceId);
+        Assert.NotNull(stored);
+        stored!.SecretExpiresAt = DateTime.UtcNow.AddMinutes(-5);
+        await _repository.UpdateAsync(stored);
+        await _unitOfWork.SaveChangesAsync();
+
+        var result = await _service.ValidateBrowserSessionAsync(issued.ReferenceId, issued.BrowserSecret);
+        Assert.Null(result);
+
+        var relaxed = await _service.ValidateBrowserSessionAsync(issued.ReferenceId, issued.BrowserSecret, requireActive: false);
+        Assert.Null(relaxed);
     }
 
     [Fact]

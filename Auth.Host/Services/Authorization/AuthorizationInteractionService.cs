@@ -14,6 +14,7 @@ using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using System.Linq;
 using System.Security.Claims;
+using Microsoft.Extensions.Logging;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Auth.Host.Services.Authorization;
@@ -27,6 +28,7 @@ public class AuthorizationInteractionService
     private readonly IOpenIddictProfileService _profile;
     private readonly ISessionService _sessions;
     private readonly SessionBindingService _sessionBinder;
+    private readonly ILogger<AuthorizationInteractionService> _logger;
 
     public AuthorizationInteractionService(
         IOpenIddictApplicationManager applicationManager,
@@ -35,7 +37,8 @@ public class AuthorizationInteractionService
         UserManager<UserEntity> userManager,
         IOpenIddictProfileService profile,
         ISessionService sessions,
-        SessionBindingService sessionBinder)
+        SessionBindingService sessionBinder,
+        ILogger<AuthorizationInteractionService> logger)
     {
         _applicationManager = applicationManager;
         _authorizationManager = authorizationManager;
@@ -44,6 +47,7 @@ public class AuthorizationInteractionService
         _profile = profile;
         _sessions = sessions;
         _sessionBinder = sessionBinder;
+        _logger = logger;
     }
 
     public async Task<IActionResult> HandleAuthorizeAsync(ControllerBase controller)
@@ -60,12 +64,14 @@ public class AuthorizationInteractionService
                 var stillValid = await _sessions.ValidateBrowserSessionAsync(reference, secret);
                 if (stillValid is null)
                 {
+                    _logger.LogInformation("Discarding invalid sid cookie {Sid} during authorize pipeline.", reference);
                     DeleteSidCookie(httpContext, SameSiteMode.Lax);
                     await _signInManager.SignOutAsync();
                 }
             }
             else
             {
+                _logger.LogInformation("Deleting malformed sid cookie during authorize pipeline.");
                 DeleteSidCookie(httpContext, SameSiteMode.Lax);
             }
         }
@@ -76,6 +82,7 @@ public class AuthorizationInteractionService
         {
             if (await TryRestoreIdentityFromSessionCookieAsync(httpContext))
             {
+                _logger.LogInformation("Successfully restored authentication from session cookie for request {RequestId}.", httpContext.TraceIdentifier);
                 result = await httpContext.AuthenticateAsync(IdentityConstants.ApplicationScheme);
             }
         }
@@ -165,7 +172,8 @@ public class AuthorizationInteractionService
                     var principal = await _profile.CreateAsync(user, request);
 
                     // Create/attach server-side session (sid)
-                await _sessionBinder.AttachInteractiveSessionAsync(httpContext, principal, user, request.ClientId);
+                    await _sessionBinder.AttachInteractiveSessionAsync(httpContext, principal, user, request.ClientId);
+                    _logger.LogInformation("Attached interactive session for user {UserId} client {ClientId} via consent policy.", user.Id, request.ClientId);
 
                     var authId = await CreatePerSessionAuthorizationAsync(principal, user, application);
                     principal.SetAuthorizationId(authId);
@@ -194,6 +202,7 @@ public class AuthorizationInteractionService
                     var consentPrincipal = await _profile.CreateAsync(user, request);
 
                     await _sessionBinder.AttachInteractiveSessionAsync(httpContext, consentPrincipal, user, request.ClientId);
+                    _logger.LogInformation("Attached interactive session for user {UserId} client {ClientId} in default consent branch.", user.Id, request.ClientId);
 
                     var authId = await CreatePerSessionAuthorizationAsync(consentPrincipal, user, application);
                     consentPrincipal.SetAuthorizationId(authId);
@@ -271,6 +280,7 @@ public class AuthorizationInteractionService
 
                 // For authorization_code grant: establish a new interactive session and stamp sid
                 await _sessionBinder.AttachInteractiveSessionAsync(httpContext, principal, user, request.ClientId);
+                _logger.LogInformation("Bound new interactive session for user {UserId} client {ClientId} during token exchange.", user.Id, request.ClientId);
             }
             else
             {
@@ -494,6 +504,7 @@ public class AuthorizationInteractionService
         var validation = await _sessions.ValidateBrowserSessionAsync(reference, secret, requireActive: true);
         if (validation is null)
         {
+            _logger.LogWarning("Failed to validate sid {Sid} while restoring identity. Clearing cookie.", reference);
             DeleteSidCookie(httpContext, SameSiteMode.Lax);
             await _signInManager.SignOutAsync();
             return false;
@@ -503,12 +514,14 @@ public class AuthorizationInteractionService
         if (user is null || !user.IsActive)
         {
             await _sessions.RevokeAsync(reference, reason: "user_missing_or_inactive");
+            _logger.LogWarning("Revoked sid {Sid} because user {UserId} missing or inactive during restore.", reference, validation.Value.UserId);
             DeleteSidCookie(httpContext, SameSiteMode.Lax);
             return false;
         }
 
         var rememberMe = DeterminePersistence(validation.Value);
         await _signInManager.SignInWithSessionPolicyAsync(user, rememberMe);
+        _logger.LogInformation("Restored identity from sid {Sid} for user {UserId}. RememberMe={RememberMe}", reference, user.Id, rememberMe);
         return true;
     }
 

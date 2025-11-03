@@ -8,6 +8,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics.Metrics;
 
 namespace Auth.Infrastructure.Services;
 
@@ -26,6 +27,11 @@ public class SessionService : ISessionService
     private const int ReferenceSizeBytes = 16;
     private const int SecretSizeBytes = 32;
     private const int SaltSizeBytes = 16;
+    private static readonly TimeSpan BrowserSecretLifetime = TimeSpan.FromHours(12);
+    private static readonly Meter Meter = new("Auth.Infrastructure.SessionService", "1.0.0");
+    private static readonly Counter<long> SessionsIssued = Meter.CreateCounter<long>("sessions.issued");
+    private static readonly Counter<long> SessionsRevoked = Meter.CreateCounter<long>("sessions.revoked");
+    private static readonly Counter<long> SecretRotations = Meter.CreateCounter<long>("sessions.secret_rotations");
 
     public SessionService(
         ISessionRepository repo,
@@ -63,10 +69,12 @@ public class SessionService : ISessionService
             ReferenceId = referenceId,
             SecretSalt = salt,
             SecretHash = HashSecret(browserSecret, salt),
-            SecretCreatedAt = DateTime.UtcNow
+            SecretCreatedAt = DateTime.UtcNow,
+            SecretExpiresAt = DateTime.UtcNow.Add(BrowserSecretLifetime)
         };
         await _repo.AddAsync(session, ct);
         await _unitOfWork.SaveChangesAsync(ct);
+        SessionsIssued.Add(1);
         return new SessionIssueResult(session.ReferenceId, browserSecret, session.CreatedAt, session.ExpiresAt);
     }
 
@@ -84,10 +92,11 @@ public class SessionService : ISessionService
         session.SecretSalt = newSalt;
         session.SecretHash = HashSecret(newSecret, newSalt);
         session.SecretCreatedAt = DateTime.UtcNow;
-        session.SecretExpiresAt = null;
+        session.SecretExpiresAt = DateTime.UtcNow.Add(BrowserSecretLifetime);
         session.LastSeenAt = DateTime.UtcNow;
         await _repo.UpdateAsync(session, ct);
         await _unitOfWork.SaveChangesAsync(ct);
+        SecretRotations.Add(1);
         return new SessionIssueResult(session.ReferenceId, newSecret, session.CreatedAt, session.ExpiresAt);
     }
 
@@ -119,15 +128,18 @@ public class SessionService : ISessionService
 
         if (authorizationIds.Count > 0)
         {
+            var cascadedTokens = 0;
             foreach (var authId in authorizationIds)
             {
-                await RevokeByAuthorizationIdAsync(authId, ct);
+                cascadedTokens += await RevokeByAuthorizationIdAsync(authId, ct);
             }
+            _logger.LogInformation("Revoked session {ReferenceId} with {AuthorizationCount} linked authorizations. Tokens revoked: {TokenCount}", referenceId, authorizationIds.Count, cascadedTokens);
         }
         else
         {
             // Fallback: match tokens by sid in payload (works for self-contained tokens)
-            await RevokeOpenIddictTokensBySidAsync(referenceId, ct);
+            var tokenCount = await RevokeOpenIddictTokensBySidAsync(referenceId, ct);
+            _logger.LogInformation("Revoked session {ReferenceId} without linked authorizations. Tokens revoked via sid sweep: {TokenCount}", referenceId, tokenCount);
         }
 
         try
@@ -143,6 +155,7 @@ public class SessionService : ISessionService
             _logger.LogWarning(ex, "Failed to delete revoked session {ReferenceId}", referenceId);
         }
 
+        SessionsRevoked.Add(1);
         return true;
     }
 
@@ -167,8 +180,15 @@ public class SessionService : ISessionService
         if (!SlowEquals(session.SecretHash, HashSecret(secret, session.SecretSalt)))
             return null;
 
+        if (session.SecretExpiresAt is not null && session.SecretExpiresAt <= DateTime.UtcNow)
+            return null;
+
         if (requireActive && !IsSessionCurrentlyActive(session))
             return null;
+
+        session.LastSeenAt = DateTime.UtcNow;
+        await _repo.UpdateAsync(session, ct);
+        await _unitOfWork.SaveChangesAsync(ct);
 
         return new SessionValidationResult(session.Id, session.UserId, session.CreatedAt, session.ExpiresAt, session.Revoked);
     }
@@ -225,8 +245,9 @@ public class SessionService : ISessionService
         return refreshRevoked + accessRevoked;
     }
 
-    private async Task RevokeByAuthorizationIdAsync(string authorizationId, CancellationToken ct)
+    private async Task<int> RevokeByAuthorizationIdAsync(string authorizationId, CancellationToken ct)
     {
+        var revokedTokens = 0;
         var authorization = await _authorizationManager.FindByIdAsync(authorizationId, ct);
         if (authorization is not null)
         {
@@ -235,8 +256,18 @@ public class SessionService : ISessionService
 
         await foreach (var token in _tokenManager.FindByAuthorizationIdAsync(authorizationId, ct))
         {
-            try { await _tokenManager.TryRevokeAsync(token!, ct); } catch { }
+            try
+            {
+                if (await _tokenManager.TryRevokeAsync(token!, ct))
+                    revokedTokens++;
+            }
+            catch
+            {
+                // ignore individual token revocation failures
+            }
         }
+
+        return revokedTokens;
     }
 
     public async Task<bool> LinkAuthorizationAsync(string referenceId, string authorizationId, string? clientId = null, CancellationToken ct = default)

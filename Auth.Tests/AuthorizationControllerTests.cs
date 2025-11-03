@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using OpenIddict.Abstractions;
 
@@ -92,7 +93,7 @@ public class AuthorizationControllerTests
         CustomSignInManager signInManager,
         ISessionService sessions)
     {
-        var guard = new SessionCookieGuard(sessions, signInManager);
+        var guard = new SessionCookieGuard(sessions, signInManager, NullLogger<SessionCookieGuard>.Instance);
         var binder = new SessionCookieBinder(sessions);
 
         return new AuthorizationInteractionService(
@@ -102,7 +103,8 @@ public class AuthorizationControllerTests
             userManager,
             Mock.Of<IOpenIddictProfileService>(),
             sessions,
-            new SessionBindingService(guard, binder));
+            new SessionBindingService(guard, binder),
+            NullLogger<AuthorizationInteractionService>.Instance);
     }
 
     private static DefaultHttpContext CreateHttpContextWithSidCookie(string reference, string secret)
