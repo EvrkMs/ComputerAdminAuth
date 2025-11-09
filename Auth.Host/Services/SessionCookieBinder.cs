@@ -4,11 +4,13 @@ using System.Security.Claims;
 using Auth.Application.Interfaces;
 using Auth.Domain.Entities;
 using Auth.Host.Extensions;
+using Auth.Host.Options;
 using Auth.Host.Services.Support;
 using Auth.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 
 namespace Auth.Host.Services;
@@ -16,10 +18,12 @@ namespace Auth.Host.Services;
 public sealed class SessionCookieBinder
 {
     private readonly ISessionService _sessions;
+    private readonly SessionCookieOptions _cookieOptions;
 
-    public SessionCookieBinder(ISessionService sessions)
+    public SessionCookieBinder(ISessionService sessions, IOptions<SessionCookieOptions> cookieOptions)
     {
         _sessions = sessions;
+        _cookieOptions = cookieOptions.Value ?? new SessionCookieOptions();
     }
 
     public async Task AttachAsync(HttpContext http, ClaimsPrincipal principal, UserEntity user, string? clientId)
@@ -96,14 +100,7 @@ public sealed class SessionCookieBinder
             "authorization_code",
             "refresh_token");
 
-        var cookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.Lax,
-            IsEssential = true,
-            Expires = DateTimeOffset.UtcNow.Add(lifetime)
-        };
+        var cookieOptions = BuildCookieOptions(lifetime);
         http.Response.Cookies.Append(SessionCookie.Name, SessionCookie.Pack(sid, issued.BrowserSecret), cookieOptions);
 
         if (cookieAuth?.Succeeded == true && cookieAuth.Principal?.Identity is ClaimsIdentity idCookie)
@@ -128,5 +125,19 @@ public sealed class SessionCookieBinder
         }
 
         return cookieAuth?.Properties?.IsPersistent ?? true;
+    }
+
+    private CookieOptions BuildCookieOptions(TimeSpan lifetime)
+    {
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = _cookieOptions.Secure,
+            SameSite = _cookieOptions.SameSite,
+            IsEssential = true,
+            Domain = string.IsNullOrWhiteSpace(_cookieOptions.Domain) ? null : _cookieOptions.Domain,
+            Path = string.IsNullOrWhiteSpace(_cookieOptions.Path) ? "/" : _cookieOptions.Path,
+            Expires = DateTimeOffset.UtcNow.Add(lifetime)
+        };
     }
 }

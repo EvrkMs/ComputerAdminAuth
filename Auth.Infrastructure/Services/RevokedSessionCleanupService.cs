@@ -53,7 +53,6 @@ public sealed class RevokedSessionCleanupService : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<ISessionRepository>();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         try
@@ -61,7 +60,6 @@ public sealed class RevokedSessionCleanupService : BackgroundService
             var removed = await repo.DeleteRevokedAsync(ct);
             if (removed > 0)
             {
-                await unitOfWork.SaveChangesAsync(ct);
                 _logger.LogInformation("Purged {Count} revoked user sessions.", removed);
             }
         }

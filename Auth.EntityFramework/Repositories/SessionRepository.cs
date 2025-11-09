@@ -51,17 +51,10 @@ public class SessionRepository(AppDbContext db) : ISessionRepository
         return Task.CompletedTask;
     }
 
-    public async Task<int> DeleteRevokedAsync(CancellationToken ct = default)
-    {
-        var revoked = await db.UserSessions
+    public Task<int> DeleteRevokedAsync(CancellationToken ct = default)
+        => db.UserSessions
             .Where(s => s.Revoked)
-            .ToListAsync(ct);
-        if (revoked.Count == 0)
-            return 0;
-
-        db.UserSessions.RemoveRange(revoked);
-        return revoked.Count;
-    }
+            .ExecuteDeleteAsync(ct);
 
     public async IAsyncEnumerable<UserSession> ListByUserAsync(Guid userId, bool onlyActive = true, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {

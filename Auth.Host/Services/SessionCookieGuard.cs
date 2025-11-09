@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Claims;
 using Auth.Application.Interfaces;
 using Auth.Domain.Entities;
+using Auth.Host.Options;
 using Auth.Host.Services.Support;
 using Auth.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
@@ -11,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 
 namespace Auth.Host.Services;
@@ -20,12 +22,18 @@ public sealed class SessionCookieGuard
     private readonly ISessionService _sessions;
     private readonly SignInManager<UserEntity> _signIn;
     private readonly ILogger<SessionCookieGuard> _logger;
+    private readonly SessionCookieOptions _cookieOptions;
 
-    public SessionCookieGuard(ISessionService sessions, SignInManager<UserEntity> signIn, ILogger<SessionCookieGuard> logger)
+    public SessionCookieGuard(
+        ISessionService sessions,
+        SignInManager<UserEntity> signIn,
+        ILogger<SessionCookieGuard> logger,
+        IOptions<SessionCookieOptions> cookieOptions)
     {
         _sessions = sessions;
         _signIn = signIn;
         _logger = logger;
+        _cookieOptions = cookieOptions.Value ?? new SessionCookieOptions();
     }
 
     public async Task<SessionGuardResult> EnsureCookieSessionOrChallengeAsync(HttpContext http, OpenIddictRequest request)
@@ -84,10 +92,11 @@ public sealed class SessionCookieGuard
         {
             http.Response.Cookies.Delete(SessionCookie.Name, new CookieOptions
             {
-                Secure = true,
-                SameSite = SameSiteMode.Lax,
+                Secure = _cookieOptions.Secure,
+                SameSite = _cookieOptions.SameSite,
                 HttpOnly = true,
-                Path = "/"
+                Domain = string.IsNullOrWhiteSpace(_cookieOptions.Domain) ? null : _cookieOptions.Domain,
+                Path = string.IsNullOrWhiteSpace(_cookieOptions.Path) ? "/" : _cookieOptions.Path
             });
         }
 

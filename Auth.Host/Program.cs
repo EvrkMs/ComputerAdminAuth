@@ -1,13 +1,17 @@
 using Auth.Application.UseCases;
+using Auth.Host.Extensions;
 using Auth.Host.Middleware;
+using Auth.Host.Options;
 using Auth.Host.ProfileService;
 using Auth.Host.Services.Cors;
 using Auth.Infrastructure;
 using Auth.Infrastructure.Seeder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Extensions.Options;
 using OpenIddict.Validation.AspNetCore;
 using System.Diagnostics;
 using System.IO.Compression;
@@ -20,6 +24,57 @@ using System.Threading.RateLimiting;
 var builder = WebApplication.CreateBuilder(args);
 var services = builder.Services;
 var cfg = builder.Configuration;
+
+services.Configure<CloudflareOptions>(options =>
+{
+    cfg.GetSection("Cloudflare").Bind(options);
+
+    var envToggle = cfg.GetValue<bool?>("USE_CLOUDFLARE")
+        ?? cfg.GetValue<bool?>("UseCloudflare");
+    if (envToggle.HasValue)
+        options.Enabled = envToggle.Value;
+
+    var envTrueClient = cfg.GetValue<bool?>("CLOUDFLARE_ALLOW_TRUE_CLIENT_IP")
+        ?? cfg.GetValue<bool?>("USE_TRUE_CLIENT_IP")
+        ?? cfg.GetValue<bool?>("USE_TRUE_CLIENT_IP_HEADER");
+    if (envTrueClient.HasValue)
+        options.AllowTrueClientIpHeader = envTrueClient.Value;
+
+    var envTrusted = cfg["CLOUDFLARE_TRUSTED_PROXIES"];
+    if (!string.IsNullOrWhiteSpace(envTrusted))
+    {
+        var combined = options.TrustedNetworks ?? Array.Empty<string>();
+        options.TrustedNetworks = combined
+            .Concat(SplitList(envTrusted))
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+});
+
+services.Configure<SessionCookieOptions>(options =>
+{
+    cfg.GetSection("SessionCookie").Bind(options);
+
+    var envDomain = cfg["SESSION_COOKIE_DOMAIN"];
+    if (!string.IsNullOrWhiteSpace(envDomain))
+        options.Domain = envDomain;
+
+    var envPath = cfg["SESSION_COOKIE_PATH"];
+    if (!string.IsNullOrWhiteSpace(envPath))
+        options.Path = envPath;
+
+    var envSameSite = cfg["SESSION_COOKIE_SAMESITE"];
+    if (!string.IsNullOrWhiteSpace(envSameSite) && Enum.TryParse<SameSiteMode>(envSameSite, true, out var parsed))
+        options.SameSite = parsed;
+
+    var envSecure = cfg["SESSION_COOKIE_SECURE"];
+    if (!string.IsNullOrWhiteSpace(envSecure) && bool.TryParse(envSecure, out var secure))
+        options.Secure = secure;
+
+    if (string.IsNullOrWhiteSpace(options.Path))
+        options.Path = "/";
+});
 
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 builder.Logging.AddFilter("Npgsql", LogLevel.Warning);
@@ -37,257 +92,13 @@ builder.WebHost.UseKestrel(o =>
         });
     });
 });
-// Application + Infrastructure
-services.AddApplication();
-services.AddInfrastructure(cfg);
-
-// Razor Pages + API controllers
-services.AddRazorPages();
-services.AddControllers()
-    .AddJsonOptions(o =>
-    {
-        o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: true));
-        o.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
-    });
-
-// Response compression (Brotli/Gzip) for HTML/JSON
-services.AddResponseCompression(o =>
-{
-    o.EnableForHttps = true;
-    o.Providers.Add<BrotliCompressionProvider>();
-    o.Providers.Add<GzipCompressionProvider>();
-    o.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
-    {
-        "application/json",
-        "application/problem+json"
-    });
-});
-services.Configure<BrotliCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
-services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
-
-// Output caching: cache anonymous GETs for short time
-services.AddOutputCache(o =>
-{
-    o.AddPolicy("AnonRazor", b => b
-        .Expire(TimeSpan.FromSeconds(60))
-        .SetVaryByQuery("*")
-        .SetVaryByHeader("Accept-Encoding")
-        .SetVaryByHeader("Cookie"));
-});
-
-services.AddScoped<IOpenIddictProfileService, OpenIddictProfileService>();
-services.AddScoped<Auth.Host.Services.SessionCookieGuard>();
-services.AddScoped<Auth.Host.Services.SessionCookieBinder>();
-services.AddScoped<Auth.Host.Services.SessionBindingService>();
-services.AddScoped<Auth.Host.Services.Authorization.AuthorizationInteractionService>();
-
-services.AddAvaCors();
-
-// Smart authentication scheme: OpenIddict validation for API, Cookies otherwise
-services.AddAuthentication(options =>
-{
-    options.DefaultScheme = "smart";
-})
-.AddPolicyScheme("smart", "Dynamic scheme", options =>
-{
-    options.ForwardDefaultSelector = ctx =>
-    {
-        if (ctx.Request.Path.StartsWithSegments("/api"))
-            return OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
-
-        if (ctx.Request.Headers.ContainsKey("Authorization"))
-            return OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
-
-        return IdentityConstants.ApplicationScheme;
-    };
-});
-
-// Antiforgery / HSTS handled at reverse proxy; set antiforgery header name here
-services.AddAntiforgery(o =>
-{
-    o.HeaderName = "X-CSRF-TOKEN";
-});
-
-// Basic rate limiting: stricter limits for token endpoints
-services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-});
+// Service wiring lives in Extensions/AuthHostServiceCollectionExtensions.cs
+services.AddAuthHostServices(cfg);
 
 var app = builder.Build();
 
-app.UseMiddleware<CloudflareTrueClientIpMiddleware>();
-
-var forwardedConfig = Environment.GetEnvironmentVariable("TRUSTED_FORWARDERS");
-var forwardedOptions = new ForwardedHeadersOptions
-{
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost,
-    RequireHeaderSymmetry = false,
-    ForwardLimit = null
-};
-forwardedOptions.KnownNetworks.Clear();
-forwardedOptions.KnownProxies.Clear();
-
-var unresolvedForwarders = new List<string>();
-if (!string.IsNullOrWhiteSpace(forwardedConfig))
-{
-    foreach (var entry in forwardedConfig.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-    {
-        if (IPAddress.TryParse(entry, out var ip))
-        {
-            forwardedOptions.KnownProxies.Add(ip);
-            continue;
-        }
-
-        try
-        {
-            var addresses = Dns.GetHostAddresses(entry);
-            if (addresses.Length == 0)
-            {
-                unresolvedForwarders.Add(entry);
-                continue;
-            }
-
-            foreach (var address in addresses)
-            {
-                if (address.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)
-                {
-                    forwardedOptions.KnownProxies.Add(address);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            unresolvedForwarders.Add(entry + $" ({ex.Message})");
-        }
-    }
-}
-
-app.UseForwardedHeaders(forwardedOptions);
-if (unresolvedForwarders.Count > 0)
-{
-    app.Logger.LogWarning("Failed to resolve some TRUSTED_FORWARDERS entries: {Entries}", string.Join(", ", unresolvedForwarders));
-}
-
-app.UseCookiePolicy(new CookiePolicyOptions
-{
-    MinimumSameSitePolicy = SameSiteMode.None,
-    Secure = CookieSecurePolicy.Always
-});
-
-// Pipeline
-// Avoid response compression for OpenID Connect endpoints to prevent
-// any proxy/client inconsistencies with Content-Length/body size during token exchange.
-app.Use(async (context, next) =>
-{
-    if (context.Request.Path.StartsWithSegments("/connect"))
-    {
-        // Remove accepted encodings so ResponseCompression won't engage.
-        context.Request.Headers.Remove("Accept-Encoding");
-    }
-    await next();
-});
-
-app.UseResponseCompression();
-app.UseRouting();
-// CORS logging middleware (place before UseCors to capture preflight short-circuit)
-app.Use(async (context, next) =>
-{
-    var origin = context.Request.Headers["Origin"].ToString();
-    if (!string.IsNullOrEmpty(origin))
-    {
-        var preflightMethod = context.Request.Headers["Access-Control-Request-Method"].ToString();
-        var preflightHeaders = context.Request.Headers["Access-Control-Request-Headers"].ToString();
-
-        context.RequestServices.GetRequiredService<ILoggerFactory>()
-            .CreateLogger("CorsLogger")
-            .LogInformation(
-                "CORS request {Method} {Path} Origin={Origin} ACRM={ACRM} ACRH={ACRH}",
-                context.Request.Method,
-                context.Request.Path,
-                origin,
-                preflightMethod,
-                preflightHeaders);
-
-        context.Response.OnStarting(state =>
-        {
-            var http = (HttpContext)state;
-            var aco = http.Response.Headers["Access-Control-Allow-Origin"].ToString();
-            var acm = http.Response.Headers["Access-Control-Allow-Methods"].ToString();
-            var ach = http.Response.Headers["Access-Control-Allow-Headers"].ToString();
-            var acc = http.Response.Headers["Access-Control-Allow-Credentials"].ToString();
-
-            http.RequestServices.GetRequiredService<ILoggerFactory>()
-                .CreateLogger("CorsLogger")
-                .LogInformation(
-                    "CORS response {Status} ACO={ACO} ACM={ACM} ACH={ACH} ACC={ACC}",
-                    http.Response.StatusCode, aco, acm, ach, acc);
-            return Task.CompletedTask;
-        }, context);
-    }
-
-    await next();
-});
-app.UseOutputCache();
-// Apply global rate limiter with per-path budgets (tighter for /connect/*)
-app.UseRateLimiter(new RateLimiterOptions
-{
-    GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-    {
-        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        var isConnect = context.Request.Path.StartsWithSegments("/connect");
-        var key = (isConnect ? "connect:" : "other:") + ip;
-        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = isConnect ? 10 : 100,
-            Window = TimeSpan.FromSeconds(10),
-            QueueLimit = 0,
-            AutoReplenishment = true
-        });
-    }),
-    RejectionStatusCode = StatusCodes.Status429TooManyRequests
-});
-// OAuth/OIDC endpoints must not be cached: set headers before response starts
-app.Use(async (context, next) =>
-{
-    if (context.Request.Path.StartsWithSegments("/connect"))
-    {
-        context.Response.OnStarting(() =>
-        {
-            context.Response.Headers["Cache-Control"] = "no-store";
-            context.Response.Headers["Pragma"] = "no-cache";
-            return Task.CompletedTask;
-        });
-    }
-    await next();
-});
-app.UseCors(CorsPolicies.Ava);
-app.UseAuthentication();
-app.UseAuthorization();
-
-// Log slow requests to spot intermittent stalls
-app.Use(async (context, next) =>
-{
-    var sw = Stopwatch.StartNew();
-    try
-    {
-        await next();
-    }
-    finally
-    {
-        sw.Stop();
-        if (sw.ElapsedMilliseconds > 1000)
-        {
-            app.Logger.LogWarning("Slow request {Method} {Path} took {Elapsed} ms, status {Status}",
-                context.Request.Method, context.Request.Path, sw.ElapsedMilliseconds, context.Response.StatusCode);
-        }
-    }
-});
-
-// Endpoints
-app.MapControllers();
-app.MapRazorPages();
-app.MapGet("/healthz", () => Results.Ok("ok"));
+// Request pipeline composition lives in Extensions/AuthHostApplicationExtensions.cs
+app.UseAuthHostPipeline(cfg);
 
 // Migrations + Seed
 using (var scope = app.Services.CreateScope())
@@ -297,6 +108,10 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+static IEnumerable<string> SplitList(string value)
+    => value.Split(new[] { ',', ';', '\n', '\r', '\t' },
+        StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
 // Ephemeral self-signed certificate (no files are created or required)
 static class EphemeralCert

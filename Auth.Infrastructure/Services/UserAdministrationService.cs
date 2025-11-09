@@ -47,23 +47,30 @@ public sealed class UserAdministrationService : IUserAdministrationService
             q = q.Where(u => u.Status == status.Value);
         }
 
-        var users = await q.OrderByDescending(u => u.CreatedAt).ToListAsync(ct);
-        if (users.Count == 0)
-            return Array.Empty<UserListItemDto>();
-
-        var userIds = users.Select(u => u.Id).ToArray();
-        var userRolePairs = await _db.UserRoles
-            .Where(ur => userIds.Contains(ur.UserId))
-            .Join(_db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.Name })
+        var items = await q
+            .OrderByDescending(u => u.CreatedAt)
+            .Select(u => new UserListItemDto
+            {
+                Id = u.Id,
+                UserName = u.UserName ?? string.Empty,
+                Email = u.Email ?? string.Empty,
+                FullName = u.FullName,
+                PhoneNumber = u.PhoneNumber,
+                Status = u.Status,
+                IsActive = u.IsActive,
+                MustChangePassword = u.MustChangePassword,
+                CreatedAt = u.CreatedAt,
+                UpdatedAt = u.UpdatedAt,
+                Roles = (from ur in _db.UserRoles
+                         join r in _db.Roles on ur.RoleId equals r.Id
+                         where ur.UserId == u.Id && r.Name != null
+                         orderby r.Name
+                         select r.Name).ToArray()
+            })
+            .AsSplitQuery()
             .ToListAsync(ct);
 
-        var rolesByUser = userRolePairs
-            .GroupBy(x => x.UserId)
-            .ToDictionary(g => g.Key, g => g.Select(x => x.Name!).OrderBy(n => n).ToArray());
-
-        return users
-            .Select(u => ToDto(u, rolesByUser.GetValueOrDefault(u.Id, Array.Empty<string>())))
-            .ToList();
+        return items;
     }
 
     public async Task<UserListItemDto?> GetAsync(Guid id, CancellationToken ct = default)

@@ -5,6 +5,7 @@ using Auth.Infrastructure;
 using Auth.Host.ProfileService; // IOpenIddictProfileService
 using Auth.Host.Services;
 using Auth.Host.Services.Support;
+using Auth.Host.Options;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
@@ -15,6 +16,7 @@ using OpenIddict.Server.AspNetCore;
 using System.Linq;
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Auth.Host.Services.Authorization;
@@ -29,6 +31,7 @@ public class AuthorizationInteractionService
     private readonly ISessionService _sessions;
     private readonly SessionBindingService _sessionBinder;
     private readonly ILogger<AuthorizationInteractionService> _logger;
+    private readonly SessionCookieOptions _cookieOptions;
 
     public AuthorizationInteractionService(
         IOpenIddictApplicationManager applicationManager,
@@ -38,7 +41,8 @@ public class AuthorizationInteractionService
         IOpenIddictProfileService profile,
         ISessionService sessions,
         SessionBindingService sessionBinder,
-        ILogger<AuthorizationInteractionService> logger)
+        ILogger<AuthorizationInteractionService> logger,
+        IOptions<SessionCookieOptions> cookieOptions)
     {
         _applicationManager = applicationManager;
         _authorizationManager = authorizationManager;
@@ -48,6 +52,7 @@ public class AuthorizationInteractionService
         _sessions = sessions;
         _sessionBinder = sessionBinder;
         _logger = logger;
+        _cookieOptions = cookieOptions.Value ?? new SessionCookieOptions();
     }
 
     public async Task<IActionResult> HandleAuthorizeAsync(ControllerBase controller)
@@ -65,14 +70,14 @@ public class AuthorizationInteractionService
                 if (stillValid is null)
                 {
                     _logger.LogInformation("Discarding invalid sid cookie {Sid} during authorize pipeline.", reference);
-                    DeleteSidCookie(httpContext, SameSiteMode.Lax);
+                    DeleteSidCookie(httpContext);
                     await _signInManager.SignOutAsync();
                 }
             }
             else
             {
                 _logger.LogInformation("Deleting malformed sid cookie during authorize pipeline.");
-                DeleteSidCookie(httpContext, SameSiteMode.Lax);
+                DeleteSidCookie(httpContext);
             }
         }
 
@@ -453,7 +458,7 @@ public class AuthorizationInteractionService
         }
 
         // Clean up sid cookie regardless
-        DeleteSidCookie(httpContext, SameSiteMode.Lax);
+        DeleteSidCookie(httpContext);
 
         await _signInManager.SignOutAsync();
 
@@ -505,7 +510,7 @@ public class AuthorizationInteractionService
         if (validation is null)
         {
             _logger.LogWarning("Failed to validate sid {Sid} while restoring identity. Clearing cookie.", reference);
-            DeleteSidCookie(httpContext, SameSiteMode.Lax);
+            DeleteSidCookie(httpContext);
             await _signInManager.SignOutAsync();
             return false;
         }
@@ -515,7 +520,7 @@ public class AuthorizationInteractionService
         {
             await _sessions.RevokeAsync(reference, reason: "user_missing_or_inactive");
             _logger.LogWarning("Revoked sid {Sid} because user {UserId} missing or inactive during restore.", reference, validation.Value.UserId);
-            DeleteSidCookie(httpContext, SameSiteMode.Lax);
+            DeleteSidCookie(httpContext);
             return false;
         }
 
@@ -544,14 +549,17 @@ public class AuthorizationInteractionService
         Expires = DateTimeOffset.UtcNow.Add(lifetime)
     };
 
-    private static void DeleteSidCookie(HttpContext httpContext, SameSiteMode sameSiteMode)
+    private void DeleteSidCookie(HttpContext httpContext)
     {
         if (httpContext.Request.Cookies.ContainsKey(SessionCookie.Name))
         {
             httpContext.Response.Cookies.Delete(SessionCookie.Name, new CookieOptions
             {
-                Secure = true,
-                SameSite = sameSiteMode
+                Secure = _cookieOptions.Secure,
+                SameSite = _cookieOptions.SameSite,
+                HttpOnly = true,
+                Domain = string.IsNullOrWhiteSpace(_cookieOptions.Domain) ? null : _cookieOptions.Domain,
+                Path = string.IsNullOrWhiteSpace(_cookieOptions.Path) ? "/" : _cookieOptions.Path
             });
         }
     }

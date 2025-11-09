@@ -81,9 +81,8 @@ public class SessionsController : ControllerBase
         var s = await _repo.GetAsync(id, ct);
         if (s is null) return NotFound();
         if (s.UserId != userId) return Forbid();
-        if (!await _sessions.RevokeAsync(s.ReferenceId, reason: "user_revoked", by: userId.ToString(), ct))
-            return NoContent();
-        return NoContent();
+        var revoked = await _sessions.RevokeAsync(s.ReferenceId, reason: "user_revoked", by: userId.ToString(), ct);
+        return revoked ? NoContent() : Conflict(new { error = "already_revoked" });
     }
 
     private string? GetCurrentSid() => ExtractSidFromContext(HttpContext);

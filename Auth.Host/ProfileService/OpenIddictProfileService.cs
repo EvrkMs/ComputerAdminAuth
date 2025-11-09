@@ -1,5 +1,6 @@
 ﻿// Auth.Host/ProfileService/OpenIddictProfileService.cs
 using Auth.Domain.Entities;
+using Auth.Shared.Contracts;
 using Microsoft.AspNetCore.Identity;
 using OpenIddict.Abstractions;
 using System.Security.Claims;
@@ -34,11 +35,14 @@ public sealed class OpenIddictProfileService(
         if (!identity.HasClaim(c => c.Type == Claims.Name))
             identity.AddClaim(new Claim(Claims.Name, user.UserName ?? user.Id.ToString()));
 
+        // Scopes/resources
+        principal.SetScopes(request.GetScopes());
+
+        var emitRoles = ShouldEmitRoleClaims(principal);
         var roles = await _userManager.GetRolesAsync(user);
         foreach (var roleName in roles)
         {
             identity.TryAddRole(roleName);
-            // (�����������) claims ����� ����:
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role != null)
             {
@@ -47,12 +51,9 @@ public sealed class OpenIddictProfileService(
                     if (!identity.HasClaim(rc.Type, rc.Value))
                         identity.AddClaim(rc);
             }
-            // Also add aggregate "roles" claim per role for SPA compatibility
-            if (!identity.HasClaim("roles", roleName))
+            if (emitRoles && !identity.HasClaim("roles", roleName))
                 identity.AddClaim(new Claim("roles", roleName));
         }
-        // Scopes/resources
-        principal.SetScopes(request.GetScopes());
 
         var resources = new List<string>();
         await foreach (var r in _scopeManager.ListResourcesAsync(principal.GetScopes(), ct))
@@ -97,10 +98,10 @@ public sealed class OpenIddictProfileService(
                         dest.Add(Destinations.IdentityToken);
                     break;
 
-                case Claims.Role:          // "role"
-                case ClaimTypes.Role:      // http://schemas.microsoft.com/ws/2008/06/identity/claims/role
-                    // Always include roles in the id_token so SPAs can determine privileges
-                    dest.Add(Destinations.IdentityToken);
+                case Claims.Role: // "role"
+                case ClaimTypes.Role: // http://schemas.microsoft.com/ws/2008/06/identity/claims/role
+                    if (ShouldEmitRoleClaims(principal))
+                        dest.Add(Destinations.IdentityToken);
                     break;
 
                 case "AspNet.Identity.SecurityStamp":
@@ -112,6 +113,11 @@ public sealed class OpenIddictProfileService(
                 claim.SetDestinations(dest);
         }
     }
+
+    private static bool ShouldEmitRoleClaims(ClaimsPrincipal principal)
+        => principal.HasScope(ApiScopes.Api) ||
+           principal.HasScope(ApiScopes.ApiRead) ||
+           principal.HasScope(ApiScopes.ApiWrite);
 }
 
 internal static class ClaimsIdentityExtensions
@@ -138,6 +144,4 @@ internal static class ClaimsIdentityRoleExtensions
             identity.AddClaim(new Claim(ClaimTypes.Role, roleValue));
     }
 }
-
-
 

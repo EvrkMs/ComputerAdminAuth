@@ -142,19 +142,6 @@ public class SessionService : ISessionService
             _logger.LogInformation("Revoked session {ReferenceId} without linked authorizations. Tokens revoked via sid sweep: {TokenCount}", referenceId, tokenCount);
         }
 
-        try
-        {
-            await ExecuteInTransactionAsync(async innerCt =>
-            {
-                await _repo.DeleteAsync(s, innerCt);
-                await _unitOfWork.SaveChangesAsync(innerCt);
-            }, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to delete revoked session {ReferenceId}", referenceId);
-        }
-
         SessionsRevoked.Add(1);
         return true;
     }

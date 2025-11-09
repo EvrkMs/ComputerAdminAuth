@@ -34,26 +34,16 @@ public class TelegramController : ControllerBase
             ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? User.FindFirstValue("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier");
 
-        _logger.LogDebug("Looking for subject claim. Found: {sub}", sub);
-        _logger.LogDebug("All claims: {claims}",
-            string.Join(", ", User.Claims.Select(c => $"{c.Type}={c.Value}")));
-
         if (string.IsNullOrWhiteSpace(sub))
         {
-            return Unauthorized(new
-            {
-                error = "no_subject",
-                claims = User.Claims.Select(c => new { c.Type, c.Value }).ToList()
-            });
+            _logger.LogWarning("TelegramController: subject claim not found for user {UserId}.", User.Identity?.Name);
+            return Unauthorized(new { error = "no_subject" });
         }
 
         if (!Guid.TryParse(sub, out var userId))
         {
-            return Unauthorized(new
-            {
-                error = "invalid_subject",
-                subject = sub
-            });
+            _logger.LogWarning("TelegramController: invalid subject claim '{Subject}'.", sub);
+            return Unauthorized(new { error = "invalid_subject" });
         }
 
         var tg = await _getMyTelegram.ExecuteAsync(userId, ct);
