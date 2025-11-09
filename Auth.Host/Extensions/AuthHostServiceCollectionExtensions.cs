@@ -1,6 +1,7 @@
 using Auth.Application.UseCases;
 using Auth.Host.ProfileService;
 using Auth.Host.Services.Authorization;
+using Auth.Host.Services.Authorization.Handlers;
 using Auth.Host.Services.Cors;
 using Auth.Infrastructure;
 using Microsoft.AspNetCore.Http;
@@ -61,9 +62,14 @@ internal static class AuthHostServiceCollectionExtensions
         });
 
         services.AddScoped<IOpenIddictProfileService, OpenIddictProfileService>();
+        services.AddScoped<SessionCookieWorkflow>();
         services.AddScoped<Auth.Host.Services.SessionCookieGuard>();
         services.AddScoped<Auth.Host.Services.SessionCookieBinder>();
         services.AddScoped<Auth.Host.Services.SessionBindingService>();
+        services.AddScoped<AuthorizeRequestHandler>();
+        services.AddScoped<TokenExchangeHandler>();
+        services.AddScoped<UserInfoRequestHandler>();
+        services.AddScoped<LogoutRequestHandler>();
         services.AddScoped<AuthorizationInteractionService>();
 
         services.AddAvaCors();
