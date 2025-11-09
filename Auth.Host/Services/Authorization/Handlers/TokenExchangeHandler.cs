@@ -1,5 +1,6 @@
 using Auth.Application.Interfaces;
 using Auth.Domain.Entities;
+using Auth.Host.ProfileService;
 using Auth.Host.Services.Support;
 using Auth.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
@@ -41,8 +42,7 @@ public sealed class TokenExchangeHandler
     public async Task<IActionResult> HandleAsync(ControllerBase controller)
     {
         var httpContext = controller.HttpContext ?? throw new InvalidOperationException("HttpContext is unavailable.");
-        var request = httpContext.GetOpenIddictServerRequest()
-            ?? throw new InvalidOperationException("The OpenID Connect request cannot be retrieved.");
+        var request = OpenIddictRequestAccessor.GetRequiredRequest(httpContext);
 
         if (!request.IsAuthorizationCodeGrantType() && !request.IsRefreshTokenGrantType())
             throw new InvalidOperationException("The specified grant type is not supported.");

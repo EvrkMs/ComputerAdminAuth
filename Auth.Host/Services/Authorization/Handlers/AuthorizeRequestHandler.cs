@@ -1,5 +1,6 @@
 using Auth.Application.Interfaces;
 using Auth.Domain.Entities;
+using Auth.Host.ProfileService;
 using Auth.Host.Services.Support;
 using Auth.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
@@ -50,8 +51,7 @@ public sealed class AuthorizeRequestHandler
     public async Task<IActionResult> HandleAsync(ControllerBase controller)
     {
         var httpContext = controller.HttpContext ?? throw new InvalidOperationException("HttpContext is unavailable.");
-        var request = httpContext.GetOpenIddictServerRequest()
-            ?? throw new InvalidOperationException("The OpenID Connect request cannot be retrieved.");
+        var request = OpenIddictRequestAccessor.GetRequiredRequest(httpContext);
 
         await ValidateSidCookieAsync(httpContext);
 

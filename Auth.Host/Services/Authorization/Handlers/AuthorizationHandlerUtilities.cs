@@ -20,7 +20,7 @@ internal static class AuthorizationHandlerUtilities
             principal: principal,
             subject: user.Id.ToString(),
             client: clientId,
-            type: AuthorizationTypes.Permanent,
+            type: OpenIddictConstants.AuthorizationTypes.Permanent,
             scopes: principal.GetScopes());
 
         var authorizationId = await authorizationManager.GetIdAsync(authorization);

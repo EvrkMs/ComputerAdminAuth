@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
+using System.Security.Claims;
 
 namespace Auth.Host.Services.Authorization.Handlers;
 
@@ -29,7 +30,7 @@ public sealed class LogoutRequestHandler
     public async Task<IActionResult> HandleAsync(ControllerBase controller)
     {
         var httpContext = controller.HttpContext ?? throw new InvalidOperationException("HttpContext is unavailable.");
-        var request = httpContext.GetOpenIddictServerRequest();
+        var request = OpenIddictRequestAccessor.GetRequiredRequest(httpContext);
 
         try
         {
