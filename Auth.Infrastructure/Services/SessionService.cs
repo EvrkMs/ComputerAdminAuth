@@ -24,6 +24,7 @@ public class SessionService : ISessionService
     private readonly IOpenIddictAuthorizationManager _authorizationManager;
     private readonly IOpenIddictTokenManager _tokenManager;
     private readonly ILogger<SessionService> _logger;
+    private readonly ITokenRevocationPublisher _revocationPublisher;
     private const int ReferenceSizeBytes = 16;
     private const int SecretSizeBytes = 32;
     private const int SaltSizeBytes = 16;
@@ -39,6 +40,7 @@ public class SessionService : ISessionService
         IUnitOfWork unitOfWork,
         IOpenIddictAuthorizationManager authorizationManager,
         IOpenIddictTokenManager tokenManager,
+        ITokenRevocationPublisher revocationPublisher,
         ILogger<SessionService> logger)
     {
         _repo = repo;
@@ -46,6 +48,7 @@ public class SessionService : ISessionService
         _unitOfWork = unitOfWork;
         _authorizationManager = authorizationManager;
         _tokenManager = tokenManager;
+        _revocationPublisher = revocationPublisher;
         _logger = logger;
     }
 
@@ -116,6 +119,10 @@ public class SessionService : ISessionService
             await _unitOfWork.SaveChangesAsync(innerCt);
         }, ct);
 
+        var notifications = new List<RevokedTokenNotification>();
+        var reasonValue = string.IsNullOrWhiteSpace(reason) ? "session_revoked" : reason!;
+        var clientId = s.ClientId;
+
         // Cascade revoke all linked authorizations (session may be tied to multiple grants)
         var authorizationIds = new HashSet<string>(StringComparer.Ordinal);
         if (!string.IsNullOrWhiteSpace(s.AuthorizationId))
@@ -131,15 +138,20 @@ public class SessionService : ISessionService
             var cascadedTokens = 0;
             foreach (var authId in authorizationIds)
             {
-                cascadedTokens += await RevokeByAuthorizationIdAsync(authId, ct);
+                cascadedTokens += await RevokeByAuthorizationIdAsync(authId, reasonValue, referenceId, clientId, notifications, ct);
             }
             _logger.LogInformation("Revoked session {ReferenceId} with {AuthorizationCount} linked authorizations. Tokens revoked: {TokenCount}", referenceId, authorizationIds.Count, cascadedTokens);
         }
         else
         {
             // Fallback: match tokens by sid in payload (works for self-contained tokens)
-            var tokenCount = await RevokeOpenIddictTokensBySidAsync(referenceId, ct);
+            var tokenCount = await RevokeOpenIddictTokensBySidAsync(referenceId, reasonValue, clientId, notifications, ct);
             _logger.LogInformation("Revoked session {ReferenceId} without linked authorizations. Tokens revoked via sid sweep: {TokenCount}", referenceId, tokenCount);
+        }
+
+        if (notifications.Count > 0)
+        {
+            await _revocationPublisher.PublishAsync(notifications, ct);
         }
 
         SessionsRevoked.Add(1);
@@ -206,7 +218,7 @@ public class SessionService : ISessionService
     private static string? Trunc(string? val, int max)
         => string.IsNullOrEmpty(val) ? val : (val!.Length <= max ? val : val.Substring(0, max));
 
-    private async Task<int> RevokeOpenIddictTokensBySidAsync(string sid, CancellationToken ct)
+    private async Task<int> RevokeOpenIddictTokensBySidAsync(string sid, string reason, string? clientId, List<RevokedTokenNotification> notifications, CancellationToken ct)
     {
         // Use a parameterized raw SQL update to avoid coupling to OpenIddict EF models.
         // Note: access tokens are JWTs (not stored). They are enforced via middleware on each request.
@@ -229,10 +241,30 @@ public class SessionService : ISessionService
               AND ""Payload"" IS NOT NULL
               AND ""Payload"" LIKE {like};", ct);
 
-        return refreshRevoked + accessRevoked;
+        var total = refreshRevoked + accessRevoked;
+
+        if (total > 0)
+        {
+            notifications.Add(new RevokedTokenNotification(
+                TokenId: null,
+                AuthorizationId: null,
+                SessionReferenceId: sid,
+                Reason: reason,
+                TimestampUtc: DateTime.UtcNow,
+                ClientId: clientId,
+                TokenCount: total));
+        }
+
+        return total;
     }
 
-    private async Task<int> RevokeByAuthorizationIdAsync(string authorizationId, CancellationToken ct)
+    private async Task<int> RevokeByAuthorizationIdAsync(
+        string authorizationId,
+        string reason,
+        string sessionReferenceId,
+        string? clientId,
+        List<RevokedTokenNotification> notifications,
+        CancellationToken ct)
     {
         var revokedTokens = 0;
         var authorization = await _authorizationManager.FindByIdAsync(authorizationId, ct);
@@ -246,7 +278,17 @@ public class SessionService : ISessionService
             try
             {
                 if (await _tokenManager.TryRevokeAsync(token!, ct))
+                {
                     revokedTokens++;
+                    var tokenId = await _tokenManager.GetIdAsync(token!, ct);
+                    notifications.Add(new RevokedTokenNotification(
+                        TokenId: tokenId,
+                        AuthorizationId: authorizationId,
+                        SessionReferenceId: sessionReferenceId,
+                        Reason: reason,
+                        TimestampUtc: DateTime.UtcNow,
+                        ClientId: clientId));
+                }
             }
             catch
             {

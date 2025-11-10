@@ -20,6 +20,7 @@ services:
     networks:
       - data-network
       - nginx_network
+      - redis-networks
 
 networks:
   data-network:
@@ -29,6 +30,10 @@ networks:
   nginx_network:
     external: true
     name: nginx_network
+
+  redis-networks:
+    external: true
+    name: redis-networks
 
 volumes:
   auth_dataprotection:

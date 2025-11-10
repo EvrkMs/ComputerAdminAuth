@@ -15,6 +15,8 @@ Configuration is typically provided via `.env` files (see `auth-host.env.sample`
 | `CLOUDFLARE_ALLOW_TRUE_CLIENT_IP` | Enables parsing of the `True-Client-IP` header (only turn on when your CDN actually sends it). |
 | `SESSION_COOKIE_DOMAIN` / `SESSION_COOKIE_PATH` | Controls which domain/path can read the `sid` cookie (defaults to `.ava-kk.ru` and `/`). |
 | `SESSION_COOKIE_SAMESITE` / `SESSION_COOKIE_SECURE` | Fine-tunes cookie behavior (`None` + `true` recommended for cross-site HTTPS-only flows). |
+| `REDIS__CONNECTIONSTRING` | Redis endpoint used to publish token/session revocation notifications (e.g. `redis:6379`). |
+| `REDIS__REVOCATIONCHANNEL` | Pub/Sub channel name for revoked token notifications (defaults to `revoked_tokens`). |
 | `TELEGRAM__BOTTOKEN` | Telegram bot token for widget verification. |
 | `TELEGRAM__ALLOWEDCLOCKSKEWSECONDS` | Widget timestamp skew allowance (defaults to 300 seconds if omitted). |
 | `OIDC_SIGNING_CERTIFICATE_PATH/PASSWORD` | Path/password for the OpenIddict signing certificate (auto-generated when both are provided). |

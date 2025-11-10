@@ -4,7 +4,9 @@ using Auth.Domain.Entities;
 using Auth.EntityFramework.Data;
 using Auth.EntityFramework.Repositories;
 using Auth.Infrastructure.Data;
+using Auth.Infrastructure.Options;
 using Auth.Infrastructure.Services;
+using Auth.Infrastructure.Services.TokenRevocation;
 using Auth.Shared.Contracts;
 using Auth.TelegramAuth.Interface;
 using Auth.TelegramAuth.Options;
@@ -15,6 +17,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using System.Security.Cryptography;
@@ -38,6 +41,7 @@ public static class DependencyInjection
         services.AddScoped<IUserAdministrationService, UserAdministrationService>();
         services.AddMemoryCache();
         services.AddSingleton<IPasswordConfirmationService, PasswordConfirmationService>();
+        ConfigureRedisPublishing(services, config);
 
         return services;
     }
@@ -242,5 +246,31 @@ public static class DependencyInjection
         {
             opt.AddDevelopmentSigningCertificate();
         }
+    }
+
+    private static void ConfigureRedisPublishing(IServiceCollection services, IConfiguration config)
+    {
+        services.Configure<RedisRevocationOptions>(options =>
+        {
+            config.GetSection("Redis").Bind(options);
+            options.ConnectionString ??= config["REDIS__CONNECTIONSTRING"];
+            var channel = config["REDIS__REVOCATIONCHANNEL"];
+            if (!string.IsNullOrWhiteSpace(channel))
+                options.ChannelName = channel!;
+        });
+
+        services.AddSingleton<ITokenRevocationPublisher>(sp =>
+        {
+            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RedisRevocationOptions>>();
+            var connectionString = opts.Value.ConnectionString;
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return new NullTokenRevocationPublisher();
+            }
+
+            return ActivatorUtilities.CreateInstance<RedisTokenRevocationPublisher>(sp);
+        });
+
+        services.AddHostedService<RevocationPublisherWarmupService>();
     }
 }
